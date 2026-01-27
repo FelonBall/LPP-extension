@@ -23,7 +23,7 @@
 
         <div class="hint" style="margin-top: 12px;">
           <strong>Tips:</strong> Lägre exponent = snabbare nivåer i början.<br>
-          Högre = jämnare fördelning. Standard: <code>1.85</code>
+          Högre = jämnare fördelning. Standard: <code>1.2</code>
         </div>
       </section>
 
@@ -44,6 +44,52 @@
           <input id="epicMode" type="checkbox" />
           <span>Legendary mode ✨ (guld, glow, shimmer)</span>
         </label>
+      </section>
+
+      <section class="card">
+        <h2>Statistik</h2>
+
+        <label class="check">
+          <input id="showStats" type="checkbox" />
+          <span>Visa statistikpanelen</span>
+        </label>
+
+        <details style="margin-top: 10px;">
+          <summary style="cursor: pointer; font-size: 13px; font-weight: 700;">Avancerat</summary>
+
+          <div style="margin-top: 10px;">
+            <label>
+              <span>Termgränser</span>
+              <select id="termBoundaryMode">
+                <option value="week">Veckobaserat (HT v36–03, VT v04–23)</option>
+                <option value="fixed">Fasta datum (HT 1 sep–18 jan, VT 19 jan–7 jun)</option>
+              </select>
+            </label>
+          </div>
+
+          <div style="margin-top: 10px;">
+            <label>
+              <span>Akademiskt år startvecka (HT-start)</span>
+              <input id="academicYearStartWeek" type="number" min="1" max="53" step="1" />
+            </label>
+          </div>
+
+          <label class="check" style="margin-top: 8px;">
+            <input id="includeSummerWeeks" type="checkbox" />
+            <span>Inkludera sommarveckor i VT</span>
+          </label>
+
+          <div style="margin-top: 10px;">
+            <label>
+              <span>Datumbas för statistik</span>
+              <select id="dateBasis">
+                <option value="exam">Examinationsdatum (primärt)</option>
+                <option value="decision">Beslutsdatum (primärt)</option>
+                <option value="auto">Auto (exam → beslut)</option>
+              </select>
+            </label>
+          </div>
+        </details>
       </section>
 
       <footer class="footer">

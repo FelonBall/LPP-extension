@@ -51,4 +51,41 @@
 
     return res;
   };
+
+  // Hook XHR (site appears to use it in some flows)
+  const origOpen = XMLHttpRequest.prototype.open;
+  const origSend = XMLHttpRequest.prototype.send;
+
+  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+    this.__ladokppUrl = url;
+    return origOpen.call(this, method, url, ...rest);
+  };
+
+  XMLHttpRequest.prototype.send = function (...args) {
+    this.addEventListener("load", function () {
+      try {
+        const url = typeof this.__ladokppUrl === "string" ? this.__ladokppUrl : null;
+        if (!url || !shouldCapture(url)) return;
+        const kursUID = extractKursUID(url);
+        const data = JSON.parse(this.responseText);
+
+        window.postMessage(
+          {
+            source: "ladokpp",
+            kind: "egenkursinformation",
+            url,
+            kursUID,
+            data
+          },
+          "*"
+        );
+      } catch (err) {
+        if (err instanceof SyntaxError) {
+          console.warn("Ladok++ API format may have changed (XHR parse error)");
+        }
+      }
+    });
+
+    return origSend.apply(this, args);
+  };
 })();

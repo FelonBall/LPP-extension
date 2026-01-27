@@ -63,6 +63,18 @@ input[type="number"]:focus {
   border-color: rgba(15, 23, 42, 0.35);
 }
 
+select {
+  width: 100%;
+  padding: 10px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  outline: none;
+  background: white;
+}
+select:focus {
+  border-color: rgba(15, 23, 42, 0.35);
+}
+
 input[type="text"] {
   width: 100%;
   padding: 10px 10px;

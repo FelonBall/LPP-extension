@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Ladok++",
-  "version": "0.4.0",
+  "version": "1.0.0",
   "description": "Experience points and gamification for Ladok.",
   "permissions": ["storage", "tabs", "scripting"],
   "host_permissions": ["https://student.ladok.se/*"],
   "background": {
-    "scripts": ["background.js"]
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
@@ -22,6 +22,12 @@
       ],
       "js": ["course_page_bridge.js"],
       "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["page_fetch_hook.js"],
+      "matches": ["https://student.ladok.se/*"]
     }
   ],
   "options_ui": {

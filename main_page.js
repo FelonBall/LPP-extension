@@ -4,6 +4,11 @@
     hideLabel: true,
     showXpToNext: true,
     epicMode: false,
+    showStats: true,
+    termBoundaryMode: "week",
+    academicYearStartWeek: 36,
+    includeSummerWeeks: true,
+    dateBasis: "exam",
 
     mountId: "studyquest-xp-widget",
     allowedPathRegex: /\/student\/app\/studentwebb\/min-utbildning\/alla\/?$/i,
@@ -69,6 +74,243 @@
     }
 
     return { courseCount, modulesTotal, modulesPassed };
+  }
+
+  function parseDateSafe(s) {
+    if (!s) return null;
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  function formatHp(n) {
+    const v = Math.round(n * 10) / 10;
+    return v.toLocaleString("sv-SE", { maximumFractionDigits: 1 });
+  }
+
+  function parseCredits(val) {
+    if (val == null) return null;
+    if (typeof val === "number") return Number.isFinite(val) ? val : null;
+    const n = Number(String(val).replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function monthKey(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    return `${y}-${m}`;
+  }
+
+  function termKey(d, cfg) {
+    return getTermRange(d, cfg).label;
+  }
+
+  function getISOWeekInfo(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const day = d.getUTCDay() || 7; // Mon=1..Sun=7
+    d.setUTCDate(d.getUTCDate() + 4 - day);
+    const year = d.getUTCFullYear();
+    const yearStart = new Date(Date.UTC(year, 0, 1));
+    const week = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+    return { year, week };
+  }
+
+  function isoWeekStartDate(year, week) {
+    const simple = new Date(Date.UTC(year, 0, 1 + (week - 1) * 7));
+    const day = simple.getUTCDay() || 7;
+    const diff = day <= 4 ? 1 - day : 8 - day;
+    simple.setUTCDate(simple.getUTCDate() + diff);
+    return new Date(simple.getUTCFullYear(), simple.getUTCMonth(), simple.getUTCDate());
+  }
+
+  function isoWeekEndDate(year, week) {
+    const start = isoWeekStartDate(year, week);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return end;
+  }
+
+  function getTermRange(d, cfg) {
+    const mode = cfg?.termBoundaryMode ?? DEFAULTS.termBoundaryMode;
+    if (mode === "fixed") {
+      // Date-based academic terms (fallback)
+      const year = d.getFullYear();
+      const htStartThis = new Date(year, 8, 1);
+      const academicYear = d >= htStartThis ? year : year - 1;
+      const htStart = new Date(academicYear, 8, 1);
+      const htEnd = new Date(academicYear + 1, 0, 18);
+      const vtStart = new Date(academicYear + 1, 0, 19);
+      const vtEnd = new Date(academicYear + 1, 5, 7);
+      const vtSummerEnd = new Date(academicYear + 1, 7, 31);
+      const includeSummer = cfg?.includeSummerWeeks ?? DEFAULTS.includeSummerWeeks;
+
+      if (d >= htStart && d <= htEnd) {
+        return { label: `${academicYear} HT`, start: htStart, end: htEnd };
+      }
+      if (d >= vtStart && d <= (includeSummer ? vtSummerEnd : vtEnd)) {
+        return { label: `${academicYear + 1} VT`, start: vtStart, end: includeSummer ? vtSummerEnd : vtEnd };
+      }
+      return { label: `${academicYear} HT`, start: htStart, end: htEnd };
+    }
+
+    // Week-based academic terms
+    const startWeek = Math.min(53, Math.max(1, cfg?.academicYearStartWeek ?? DEFAULTS.academicYearStartWeek));
+    const includeSummer = cfg?.includeSummerWeeks ?? DEFAULTS.includeSummerWeeks;
+    const { year, week } = getISOWeekInfo(d);
+
+    if (week >= startWeek || week <= 3) {
+      const academicYear = week >= startWeek ? year : year - 1;
+      return {
+        label: `${academicYear} HT`,
+        start: isoWeekStartDate(academicYear, startWeek),
+        end: isoWeekEndDate(academicYear + 1, 3)
+      };
+    }
+
+    const vtEndWeek = includeSummer
+      ? Math.max(4, startWeek - 1)
+      : Math.max(4, Math.min(23, startWeek - 1));
+
+    if (!includeSummer && week > vtEndWeek && week < startWeek) {
+      return {
+        label: `${year} Sommar`,
+        start: isoWeekStartDate(year, vtEndWeek + 1),
+        end: isoWeekEndDate(year, startWeek - 1)
+      };
+    }
+
+    return {
+      label: `${year} VT`,
+      start: isoWeekStartDate(year, 4),
+      end: isoWeekEndDate(year, vtEndWeek)
+    };
+  }
+
+  function pickResultDate(result, cfg) {
+    if (!result) return null;
+    const basis = cfg?.dateBasis ?? DEFAULTS.dateBasis;
+    const exam = parseDateSafe(result.examDate);
+    const decision = parseDateSafe(result.decisionDate);
+    if (basis === "decision") return decision || exam;
+    if (basis === "auto") return exam || decision;
+    return exam || decision; // "exam" default
+  }
+
+  function toDay(d) {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
+  function daysInclusive(a, b) {
+    const ms = 24 * 60 * 60 * 1000;
+    return Math.floor((toDay(b) - toDay(a)) / ms) + 1;
+  }
+
+  function pickModuleDate(m, cfg) {
+    const latest = m?.latest;
+    const d1 = pickResultDate(latest, cfg);
+    if (d1) return d1;
+    const attempts = Array.isArray(m?.attempts) ? m.attempts : [];
+    for (let i = attempts.length - 1; i >= 0; i -= 1) {
+      const d = pickResultDate(attempts[i], cfg);
+      if (d) return d;
+    }
+    return null;
+  }
+
+  function computeStatsFromSaved(savedCoursesObj, cfg) {
+    const courses = Object.values(savedCoursesObj || {});
+    const monthMap = new Map(); // key -> { credits, modules }
+    const termMap = new Map(); // key -> { credits, modules, date }
+    const now = new Date();
+    const currentMonthKey = monthKey(now);
+    const currentTerm = getTermRange(now, cfg);
+
+    for (const c of courses) {
+      const mods = c?.modules || [];
+      let moduleCreditsSum = 0;
+      let moduleCreditsCount = 0;
+      for (const m of mods) {
+        const latest = m?.latest;
+        const g = latest?.grade;
+        const credits = parseCredits(m?.creditsAwarded ?? m?.credits);
+        if (!g || !isPassedGrade(g)) continue;
+        if (!credits || !Number.isFinite(credits) || credits <= 0) continue;
+        const d = pickModuleDate(m, cfg);
+        if (!d) continue;
+        moduleCreditsSum += credits;
+        moduleCreditsCount += 1;
+
+        const key = monthKey(d);
+        const cur = monthMap.get(key) || { credits: 0, modules: 0, date: new Date(d.getFullYear(), d.getMonth(), 1) };
+        cur.credits += credits;
+        cur.modules += 1;
+        monthMap.set(key, cur);
+
+        const tKey = termKey(d, cfg);
+        const tRange = getTermRange(d, cfg);
+        const tDate = tRange.start;
+        const tcur = termMap.get(tKey) || { credits: 0, modules: 0, date: tDate, label: tKey };
+        tcur.credits += credits;
+        tcur.modules += 1;
+        termMap.set(tKey, tcur);
+      }
+
+      // If module credits are missing, fall back to course-level credits + course result date
+      if (moduleCreditsSum === 0) {
+        const cr = c?.courseResult;
+        const g = cr?.grade;
+        const credits = parseCredits(c?.courseCreditsAwarded ?? c?.courseCredits);
+        if (g && isPassedGrade(g) && credits && Number.isFinite(credits) && credits > 0) {
+          const d = pickResultDate(cr, cfg) || parseDateSafe(c?.end) || parseDateSafe(c?.start);
+          if (d) {
+            const key = monthKey(d);
+            const cur = monthMap.get(key) || { credits: 0, modules: 0, date: new Date(d.getFullYear(), d.getMonth(), 1) };
+            cur.credits += credits;
+            monthMap.set(key, cur);
+
+            const tKey = termKey(d, cfg);
+            const tRange = getTermRange(d, cfg);
+            const tDate = tRange.start;
+            const tcur = termMap.get(tKey) || { credits: 0, modules: 0, date: tDate, label: tKey };
+            tcur.credits += credits;
+            termMap.set(tKey, tcur);
+          }
+        }
+      }
+    }
+
+    const rows = Array.from(monthMap.values()).sort((a, b) => a.date - b.date);
+    const termRows = Array.from(termMap.values()).sort((a, b) => a.date - b.date);
+    let cumulative = 0;
+    const series = rows.map((r) => {
+      cumulative += r.credits;
+      return {
+        date: r.date,
+        credits: r.credits,
+        modules: r.modules,
+        cumulative
+      };
+    });
+
+    const monthSeries = rows.map((r) => ({
+      date: r.date,
+      credits: r.credits
+    }));
+
+    const termSeries = termRows.map((r) => ({
+      date: r.date,
+      credits: r.credits,
+      modules: r.modules,
+      label: r.label
+    }));
+
+    return {
+      series,
+      monthSeries,
+      termSeries,
+      hasData: courses.length > 0,
+      currentMonthKey,
+      currentTermLabel: currentTerm.label
+    };
   }
 
   async function ladokppScanUrls(urls) {
@@ -276,6 +518,511 @@
     if (style) style.remove();
   }
 
+  function renderStatsPanel(stats, accent, epic) {
+    const wrap = document.createElement("div");
+    wrap.style.display = "grid";
+    wrap.style.gap = "10px";
+    wrap.style.marginTop = epic ? "6px" : "4px";
+
+    const details = document.createElement("details");
+    details.open = false;
+
+    const summary = document.createElement("summary");
+    summary.textContent = "Statistik";
+    summary.style.cursor = "pointer";
+    summary.style.listStyle = "none";
+    summary.style.fontWeight = "800";
+    summary.style.fontSize = epic ? "15px" : "13px";
+    summary.style.padding = "6px 0";
+    summary.style.color = "inherit";
+    details.appendChild(summary);
+
+    const body = document.createElement("div");
+    body.style.display = "grid";
+    body.style.gap = "12px";
+    body.style.padding = "6px 0 2px 0";
+
+    const series = stats?.series || [];
+    const termSeries = stats?.termSeries || [];
+    if (series.length === 0) {
+      const empty = document.createElement("div");
+      empty.textContent = stats?.hasData
+        ? "Hittar ingen tidsstämplad HP ännu. Skanna fler kurser eller öppna kursresultat så att datum finns."
+        : "Ingen statistik ännu — skanna kurser för att bygga upp data.";
+      empty.style.fontSize = epic ? "13px" : "12px";
+      empty.style.opacity = "0.75";
+      body.appendChild(empty);
+    } else {
+      const lineWrap = document.createElement("div");
+      const lineTitle = document.createElement("div");
+      lineTitle.textContent = "Total HP över tid (kumulativt, baserat på godkända moment)";
+      lineTitle.style.fontSize = epic ? "13px" : "12px";
+      lineTitle.style.fontWeight = "700";
+      lineTitle.style.marginBottom = "6px";
+      lineWrap.appendChild(lineTitle);
+
+      const lineCanvas = document.createElement("canvas");
+      lineCanvas.style.width = "100%";
+      lineCanvas.style.height = "160px";
+      lineCanvas.style.borderRadius = "12px";
+      lineCanvas.style.background = epic ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.8)";
+      lineCanvas.style.border = `1px solid ${rgbToRgba(accent, 0.18)}`;
+      lineWrap.appendChild(lineCanvas);
+
+      const midWrap = document.createElement("div");
+      const midTitle = document.createElement("div");
+      midTitle.textContent = "Per månad";
+      midTitle.style.fontSize = epic ? "13px" : "12px";
+      midTitle.style.fontWeight = "700";
+      midTitle.style.marginBottom = "6px";
+      midWrap.appendChild(midTitle);
+
+      const modWrap = document.createElement("div");
+      const modCanvas = document.createElement("canvas");
+      modCanvas.style.width = "100%";
+      modCanvas.style.height = "110px";
+      modCanvas.style.borderRadius = "12px";
+      modCanvas.style.background = epic ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.8)";
+      modCanvas.style.border = `1px solid ${rgbToRgba(accent, 0.18)}`;
+      modWrap.appendChild(modCanvas);
+
+      const hpWrap = document.createElement("div");
+      const hpCanvas = document.createElement("canvas");
+      hpCanvas.style.width = "100%";
+      hpCanvas.style.height = "110px";
+      hpCanvas.style.borderRadius = "12px";
+      hpCanvas.style.background = epic ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.8)";
+      hpCanvas.style.border = `1px solid ${rgbToRgba(accent, 0.18)}`;
+      hpWrap.appendChild(hpCanvas);
+
+      const midToggle = document.createElement("div");
+      midToggle.style.display = "flex";
+      midToggle.style.gap = "8px";
+      midToggle.style.margin = "4px 0 2px 0";
+
+      const midBtnModules = document.createElement("button");
+      midBtnModules.type = "button";
+      midBtnModules.textContent = "Moduler";
+      midBtnModules.style.borderRadius = "999px";
+      midBtnModules.style.padding = "6px 10px";
+      midBtnModules.style.fontSize = epic ? "12px" : "11px";
+      midBtnModules.style.border = `1px solid ${rgbToRgba(accent, 0.18)}`;
+      midBtnModules.style.background = rgbToRgba(accent, 0.12);
+      midBtnModules.style.cursor = "pointer";
+
+      const midBtnHp = document.createElement("button");
+      midBtnHp.type = "button";
+      midBtnHp.textContent = "HP";
+      midBtnHp.style.borderRadius = "999px";
+      midBtnHp.style.padding = "6px 10px";
+      midBtnHp.style.fontSize = epic ? "12px" : "11px";
+      midBtnHp.style.border = `1px solid ${rgbToRgba(accent, 0.18)}`;
+      midBtnHp.style.background = "rgba(255,255,255,0.8)";
+      midBtnHp.style.cursor = "pointer";
+
+      const setMidMode = (mode) => {
+        const showModules = mode === "modules";
+        modWrap.style.display = showModules ? "block" : "none";
+        hpWrap.style.display = showModules ? "none" : "block";
+        midBtnModules.style.background = showModules ? rgbToRgba(accent, 0.12) : "rgba(255,255,255,0.8)";
+        midBtnHp.style.background = showModules ? "rgba(255,255,255,0.8)" : rgbToRgba(accent, 0.12);
+        midBtnModules.setAttribute("aria-pressed", showModules ? "true" : "false");
+        midBtnHp.setAttribute("aria-pressed", showModules ? "false" : "true");
+
+        // Re-render after visibility change to ensure canvas size is measurable
+        setTimeout(() => {
+          if (showModules) {
+            renderBarChart(modCanvas, series, accent, stats.currentMonthKey);
+          } else {
+            renderMonthHpChart(hpCanvas, stats.monthSeries || [], accent, stats.currentMonthKey);
+          }
+        }, 0);
+      };
+
+      midBtnModules.addEventListener("click", () => setMidMode("modules"));
+      midBtnHp.addEventListener("click", () => setMidMode("hp"));
+      setMidMode("modules");
+
+      midToggle.appendChild(midBtnModules);
+      midToggle.appendChild(midBtnHp);
+      midWrap.appendChild(midToggle);
+      midWrap.appendChild(modWrap);
+      midWrap.appendChild(hpWrap);
+
+      const termWrap = document.createElement("div");
+      const termTitle = document.createElement("div");
+      termTitle.textContent = "HP per termin (summa)";
+      termTitle.style.fontSize = epic ? "13px" : "12px";
+      termTitle.style.fontWeight = "700";
+      termTitle.style.marginBottom = "6px";
+      termWrap.appendChild(termTitle);
+
+      const termCanvas = document.createElement("canvas");
+      termCanvas.style.width = "100%";
+      termCanvas.style.height = "120px";
+      termCanvas.style.borderRadius = "12px";
+      termCanvas.style.background = epic ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.8)";
+      termCanvas.style.border = `1px solid ${rgbToRgba(accent, 0.18)}`;
+      termWrap.appendChild(termCanvas);
+
+      body.appendChild(lineWrap);
+      body.appendChild(midWrap);
+      body.appendChild(termWrap);
+
+      // Render charts once added to DOM
+      setTimeout(() => {
+        renderLineChart(lineCanvas, series, accent, stats.currentMonthKey);
+        renderBarChart(modCanvas, series, accent, stats.currentMonthKey);
+        renderTermChart(termCanvas, termSeries, accent, stats.currentTermLabel);
+        renderMonthHpChart(hpCanvas, stats.monthSeries || [], accent, stats.currentMonthKey);
+      }, 0);
+    }
+
+    details.appendChild(body);
+    wrap.appendChild(details);
+    return wrap;
+  }
+
+  function resizeCanvas(canvas, height) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.max(1, rect.width);
+    const h = height;
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    return { ctx, width: w, height: h };
+  }
+
+  function ensureTooltip(canvas) {
+    if (canvas.__ladokppTooltip) return canvas.__ladokppTooltip;
+    const tip = document.createElement("div");
+    tip.style.position = "absolute";
+    tip.style.pointerEvents = "none";
+    tip.style.background = "rgba(15, 23, 42, 0.92)";
+    tip.style.color = "white";
+    tip.style.padding = "6px 8px";
+    tip.style.borderRadius = "8px";
+    tip.style.fontSize = "11px";
+    tip.style.whiteSpace = "nowrap";
+    tip.style.transform = "translate(-50%, -110%)";
+    tip.style.opacity = "0";
+    tip.style.transition = "opacity 120ms ease";
+    tip.style.zIndex = "10";
+    const parent = canvas.parentElement;
+    if (parent) {
+      parent.style.position = "relative";
+      parent.appendChild(tip);
+    }
+    canvas.__ladokppTooltip = tip;
+    return tip;
+  }
+
+  function setTooltip(tip, x, y, text) {
+    if (!tip) return;
+    tip.textContent = text;
+    tip.style.left = `${x}px`;
+    tip.style.top = `${y}px`;
+    tip.style.opacity = "1";
+  }
+
+  function hideTooltip(tip) {
+    if (tip) tip.style.opacity = "0";
+  }
+
+  function fmtMonth(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  function renderLineChart(canvas, series, accent, currentMonthKey) {
+    const { ctx, width, height } = resizeCanvas(canvas, 160);
+    ctx.clearRect(0, 0, width, height);
+
+    const pad = { l: 36, r: 12, t: 12, b: 24 };
+    const plotW = width - pad.l - pad.r;
+    const plotH = height - pad.t - pad.b;
+    if (plotW <= 0 || plotH <= 0) return;
+
+    const maxY = Math.max(1, ...series.map(s => s.cumulative));
+    const gridLines = 4;
+    ctx.strokeStyle = "rgba(15, 23, 42, 0.08)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= gridLines; i += 1) {
+      const y = pad.t + (i / gridLines) * plotH;
+      ctx.beginPath();
+      ctx.moveTo(pad.l, y);
+      ctx.lineTo(pad.l + plotW, y);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "rgba(15, 23, 42, 0.7)";
+    ctx.font = "11px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillText("0", pad.l - 6, pad.t + plotH);
+    ctx.fillText(String(Math.round(maxY)), pad.l - 6, pad.t + 4);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText("HP", pad.l + 2, pad.t + 2);
+
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    const points = [];
+    series.forEach((s, i) => {
+      const x = pad.l + (i / Math.max(1, series.length - 1)) * plotW;
+      const y = pad.t + plotH - (s.cumulative / maxY) * plotH;
+      points.push({ x, y, data: s });
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    ctx.fillStyle = accent;
+    points.forEach((p) => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    if (currentMonthKey) {
+      const idx = series.findIndex(s => fmtMonth(s.date) === currentMonthKey);
+      if (idx >= 0) {
+        const x = pad.l + (idx / Math.max(1, series.length - 1)) * plotW;
+        ctx.strokeStyle = "rgba(15, 23, 42, 0.18)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, pad.t);
+        ctx.lineTo(x, pad.t + plotH);
+        ctx.stroke();
+      }
+    }
+
+    const last = series[series.length - 1];
+    const first = series[0];
+    const fmt = (d) => fmtMonth(d);
+    ctx.fillStyle = "rgba(15, 23, 42, 0.6)";
+    ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText(fmt(first.date), pad.l, pad.t + plotH + 6);
+    ctx.textAlign = "right";
+    ctx.fillText(fmt(last.date), pad.l + plotW, pad.t + plotH + 6);
+
+    // Label last point value
+    const lastPoint = points[points.length - 1];
+    if (lastPoint) {
+      ctx.fillStyle = accent;
+      ctx.font = "11px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`${formatHp(last.cumulative)} HP`, lastPoint.x + 6, lastPoint.y);
+    }
+
+    // Hover tooltip
+    canvas.__ladokppLine = { points, pad, plotW, plotH };
+    const tip = ensureTooltip(canvas);
+    if (!canvas.__ladokppLineBound) {
+      canvas.__ladokppLineBound = true;
+      canvas.addEventListener("mousemove", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const data = canvas.__ladokppLine;
+        if (!data || !data.points?.length) return;
+        let best = data.points[0];
+        let bestDx = Math.abs(x - best.x);
+        for (const p of data.points) {
+          const dx = Math.abs(x - p.x);
+          if (dx < bestDx) {
+            best = p;
+            bestDx = dx;
+          }
+        }
+        const label = `${fmtMonth(best.data.date)} • ${formatHp(best.data.cumulative)} HP`;
+        setTooltip(tip, best.x, best.y, label);
+      });
+      canvas.addEventListener("mouseleave", () => hideTooltip(tip));
+    }
+  }
+
+  function renderBarChart(canvas, series, accent, currentMonthKey) {
+    const { ctx, width, height } = resizeCanvas(canvas, 110);
+    ctx.clearRect(0, 0, width, height);
+
+    const pad = { l: 28, r: 10, t: 10, b: 20 };
+    const plotW = width - pad.l - pad.r;
+    const plotH = height - pad.t - pad.b;
+    if (plotW <= 0 || plotH <= 0) return;
+
+    const maxY = Math.max(1, ...series.map(s => s.modules));
+    const barCount = series.length;
+    const barGap = 6;
+    const barW = Math.max(6, (plotW - barGap * (barCount - 1)) / barCount);
+
+    ctx.fillStyle = "rgba(15, 23, 42, 0.12)";
+    ctx.fillRect(pad.l, pad.t + plotH, plotW, 1);
+
+    const bars = [];
+    series.forEach((s, i) => {
+      const h = (s.modules / maxY) * plotH;
+      const x = pad.l + i * (barW + barGap);
+      const y = pad.t + plotH - h;
+      bars.push({ x, y, w: barW, h, data: s });
+      const isCurrent = currentMonthKey && fmtMonth(s.date) === currentMonthKey;
+      ctx.fillStyle = isCurrent ? rgbToRgba(accent, 1) : rgbToRgba(accent, 0.7);
+      ctx.fillRect(x, y, barW, h);
+    });
+
+    ctx.fillStyle = "rgba(15, 23, 42, 0.6)";
+    ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    const first = series[0];
+    const last = series[series.length - 1];
+    const fmt = (d) => fmtMonth(d);
+    ctx.fillText(fmt(first.date), pad.l, pad.t + plotH + 6);
+    ctx.textAlign = "right";
+    ctx.fillText(fmt(last.date), pad.l + plotW, pad.t + plotH + 6);
+
+    // Hover tooltip
+    canvas.__ladokppBars = { bars };
+    const tip = ensureTooltip(canvas);
+    if (!canvas.__ladokppBarsBound) {
+      canvas.__ladokppBarsBound = true;
+      canvas.addEventListener("mousemove", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const data = canvas.__ladokppBars;
+        if (!data || !data.bars?.length) return;
+        const hit = data.bars.find(b => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
+        if (!hit) return;
+        const label = `${fmtMonth(hit.data.date)} • ${hit.data.modules} moduler`;
+        setTooltip(tip, hit.x + hit.w / 2, hit.y, label);
+      });
+      canvas.addEventListener("mouseleave", () => hideTooltip(tip));
+    }
+  }
+
+  function renderTermChart(canvas, series, accent, currentTermLabel) {
+    const { ctx, width, height } = resizeCanvas(canvas, 120);
+    ctx.clearRect(0, 0, width, height);
+
+    const pad = { l: 34, r: 10, t: 10, b: 28 };
+    const plotW = width - pad.l - pad.r;
+    const plotH = height - pad.t - pad.b;
+    if (plotW <= 0 || plotH <= 0) return;
+    if (!series || series.length === 0) return;
+
+    const maxY = Math.max(1, ...series.map(s => s.credits));
+    const barCount = series.length;
+    const barGap = 8;
+    const barW = Math.max(10, (plotW - barGap * (barCount - 1)) / barCount);
+
+    ctx.fillStyle = "rgba(15, 23, 42, 0.12)";
+    ctx.fillRect(pad.l, pad.t + plotH, plotW, 1);
+
+    const bars = [];
+    series.forEach((s, i) => {
+      const h = (s.credits / maxY) * plotH;
+      const x = pad.l + i * (barW + barGap);
+      const y = pad.t + plotH - h;
+      bars.push({ x, y, w: barW, h, data: s });
+      const isCurrent = currentTermLabel && s.label === currentTermLabel;
+      ctx.fillStyle = isCurrent ? rgbToRgba(accent, 1) : rgbToRgba(accent, 0.7);
+      ctx.fillRect(x, y, barW, h);
+    });
+
+    ctx.fillStyle = "rgba(15, 23, 42, 0.6)";
+    ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    const first = series[0];
+    const last = series[series.length - 1];
+    ctx.fillText(first.label || "", pad.l, pad.t + plotH + 6);
+    ctx.textAlign = "right";
+    ctx.fillText(last.label || "", pad.l + plotW, pad.t + plotH + 6);
+
+    // Hover tooltip
+    canvas.__ladokppTerm = { bars };
+    const tip = ensureTooltip(canvas);
+    if (!canvas.__ladokppTermBound) {
+      canvas.__ladokppTermBound = true;
+      canvas.addEventListener("mousemove", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const data = canvas.__ladokppTerm;
+        if (!data || !data.bars?.length) return;
+        const hit = data.bars.find(b => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
+        if (!hit) return;
+        const label = `${hit.data.label} • ${formatHp(hit.data.credits)} HP`;
+        setTooltip(tip, hit.x + hit.w / 2, hit.y, label);
+      });
+      canvas.addEventListener("mouseleave", () => hideTooltip(tip));
+    }
+  }
+
+  function renderMonthHpChart(canvas, series, accent, currentMonthKey) {
+    const { ctx, width, height } = resizeCanvas(canvas, 120);
+    ctx.clearRect(0, 0, width, height);
+
+    const pad = { l: 34, r: 10, t: 10, b: 28 };
+    const plotW = width - pad.l - pad.r;
+    const plotH = height - pad.t - pad.b;
+    if (plotW <= 0 || plotH <= 0) return;
+    if (!series || series.length === 0) return;
+
+    const maxY = Math.max(1, ...series.map(s => s.credits));
+    const barCount = series.length;
+    const barGap = 6;
+    const barW = Math.max(8, (plotW - barGap * (barCount - 1)) / barCount);
+
+    ctx.fillStyle = "rgba(15, 23, 42, 0.12)";
+    ctx.fillRect(pad.l, pad.t + plotH, plotW, 1);
+
+    const bars = [];
+    series.forEach((s, i) => {
+      const h = (s.credits / maxY) * plotH;
+      const x = pad.l + i * (barW + barGap);
+      const y = pad.t + plotH - h;
+      bars.push({ x, y, w: barW, h, data: s });
+      const isCurrent = currentMonthKey && fmtMonth(s.date) === currentMonthKey;
+      ctx.fillStyle = isCurrent ? rgbToRgba(accent, 1) : rgbToRgba(accent, 0.7);
+      ctx.fillRect(x, y, barW, h);
+    });
+
+    ctx.fillStyle = "rgba(15, 23, 42, 0.6)";
+    ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    const first = series[0];
+    const last = series[series.length - 1];
+    ctx.fillText(fmtMonth(first.date), pad.l, pad.t + plotH + 6);
+    ctx.textAlign = "right";
+    ctx.fillText(fmtMonth(last.date), pad.l + plotW, pad.t + plotH + 6);
+
+    canvas.__ladokppMonthHp = { bars };
+    const tip = ensureTooltip(canvas);
+    if (!canvas.__ladokppMonthHpBound) {
+      canvas.__ladokppMonthHpBound = true;
+      canvas.addEventListener("mousemove", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const data = canvas.__ladokppMonthHp;
+        if (!data || !data.bars?.length) return;
+        const hit = data.bars.find(b => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
+        if (!hit) return;
+        const label = `${fmtMonth(hit.data.date)} • ${formatHp(hit.data.credits)} HP`;
+        setTooltip(tip, hit.x + hit.w / 2, hit.y, label);
+      });
+      canvas.addEventListener("mouseleave", () => hideTooltip(tip));
+    }
+  }
+
   // ---------------- render -----------------
   function renderWidget({ titleAnchor, completedHp, totalHp, extras }, cfg) {
     const accent = pickAccentColor();
@@ -301,10 +1048,10 @@
     if (epic) wrap.classList.add("sq-legendary");
 
     wrap.style.display = "grid";
-    wrap.style.gap = epic ? "14px" : "10px";
+    wrap.style.gap = epic ? "12px" : "8px";
     wrap.style.width = "100%";
-    wrap.style.padding = epic ? "max(16px, 3vw) max(16px, 4vw)" : "max(10px, 2vw) max(12px, 3vw)";
-    wrap.style.borderRadius = epic ? "max(16px, 2vw)" : "max(12px, 1.5vw)";
+    wrap.style.padding = epic ? "max(14px, 2.6vw) max(14px, 3.2vw)" : "max(8px, 1.6vw) max(10px, 2.2vw)";
+    wrap.style.borderRadius = epic ? "max(18px, 2.2vw)" : "max(14px, 1.8vw)";
     wrap.style.boxSizing = "border-box";
     wrap.style.border = `1px solid ${rgbToRgba(accent, 0.22)}`;
     wrap.style.background = epic
@@ -319,7 +1066,7 @@
     const layer = document.createElement("div");
     layer.className = "sq-layer";
     layer.style.display = "grid";
-    layer.style.gap = epic ? "14px" : "10px";
+    layer.style.gap = epic ? "12px" : "8px";
 
     // Top row
     const top = document.createElement("div");
@@ -335,7 +1082,7 @@
 
     // Put the clickable program <a> inside the module
     const label = document.createElement("div");
-    label.style.fontSize = epic ? "28px" : "26px";
+    label.style.fontSize = epic ? "30px" : "27px";
     label.style.letterSpacing = "0.01em";
     label.style.opacity = "0.92";
     if (epic) label.style.textShadow = "0 1px 0 rgba(255,255,255,0.65)";
@@ -361,7 +1108,7 @@
 
     const hpLine = document.createElement("div");
     hpLine.textContent = `${completedHp.toLocaleString("sv-SE")} / ${totalHp.toLocaleString("sv-SE")} hp`;
-    hpLine.style.fontSize = epic ? "24px" : "20px";
+    hpLine.style.fontSize = epic ? "25px" : "21px";
     hpLine.style.fontWeight = epic ? "900" : "700";
     hpLine.style.whiteSpace = "nowrap";
     hpLine.style.overflow = "hidden";
@@ -374,7 +1121,7 @@
     badge.setAttribute("role", "status");
     badge.setAttribute("aria-label", `Level ${level} of 100`);
     badge.textContent = `LV ${level} / 100`;
-    badge.style.fontSize = epic ? "22px" : "18px";
+    badge.style.fontSize = epic ? "23px" : "19px";
     badge.style.fontWeight = "950";
     badge.style.color = epic ? "rgba(10, 12, 18, 0.92)" : "white";
     badge.style.background = epic
@@ -403,7 +1150,7 @@
     barWrap.setAttribute("aria-valuemin", "0");
     barWrap.setAttribute("aria-valuemax", "100");
     barWrap.setAttribute("aria-label", `Progress to level ${Math.min(100, level + 1)}: ${Math.round(pct)}%`);
-    barWrap.style.height = epic ? "26px" : "18px";
+    barWrap.style.height = epic ? "28px" : "19px";
     barWrap.style.background = epic
       ? "linear-gradient(180deg, rgba(30, 22, 12, 0.18), rgba(0,0,0,0.10))"
       : "rgba(0,0,0,0.10)";
@@ -464,7 +1211,7 @@
     }
 
     // ---- Ladok++ extras: scan coverage + modules progress + scan button ----
-    if (extras) {
+    if (extras && cfg.showStats) {
       const extra = document.createElement("div");
       extra.style.display = "flex";
       extra.style.justifyContent = "space-between";
@@ -485,7 +1232,7 @@
         : `${savedCourseCount} kurser skannade`;
 
       const modLine = (typeof modulesTotal === "number" && modulesTotal > 0)
-        ? ` • Moduler: ${modulesPassed}/${modulesTotal}`
+        ? ` • Avklarade moduler (total): ${modulesPassed}/${modulesTotal}`
         : "";
 
       leftExtra.textContent = coverage + modLine;
@@ -514,6 +1261,10 @@
       layer.appendChild(extra);
     }
 
+    if (extras?.stats && cfg.showStats) {
+      const statsPanel = renderStatsPanel(extras.stats, accent, epic);
+      layer.appendChild(statsPanel);
+    }
 
     wrap.appendChild(layer);
     return wrap;
@@ -617,6 +1368,7 @@
 
     const savedCourses = await ladokppGetAllCourseData();
     const agg = computeAggregateFromSaved(savedCourses);
+    const stats = computeStatsFromSaved(savedCourses, cfg);
 
 
     const existing = dd.querySelector(`#${cfg.mountId}`);
@@ -671,7 +1423,8 @@
       modulesPassed: agg.modulesPassed,
       listCourseCount,
       scanBusy,
-      onScanAll
+      onScanAll,
+      stats
     };
 
     const widget = renderWidget(
