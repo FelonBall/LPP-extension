@@ -1,10 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "Ladok++",
+  "name": "L++",
   "version": "1.0.0",
-  "description": "Experience points and gamification for Ladok.",
-  "permissions": ["storage", "tabs", "scripting"],
-  "host_permissions": ["https://student.ladok.se/*"],
+  "description": "Experience points and gamification for Ladok, the Swedish university system.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": [
+    "https://student.ladok.se/student/app/studentwebb/min-utbildning/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
