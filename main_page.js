@@ -671,10 +671,21 @@
 
       // Render charts once added to DOM
       setTimeout(() => {
-        renderLineChart(lineCanvas, series, accent, stats.currentMonthKey);
-        renderBarChart(modCanvas, series, accent, stats.currentMonthKey);
-        renderTermChart(termCanvas, termSeries, accent, stats.currentTermLabel);
-        renderMonthHpChart(hpCanvas, stats.monthSeries || [], accent, stats.currentMonthKey);
+        const renderLine = () => renderLineChart(lineCanvas, series, accent, stats.currentMonthKey);
+        const renderMods = () => renderBarChart(modCanvas, series, accent, stats.currentMonthKey);
+        const renderTerm = () => renderTermChart(termCanvas, termSeries, accent, stats.currentTermLabel);
+        const renderMonthHp = () => renderMonthHpChart(hpCanvas, stats.monthSeries || [], accent, stats.currentMonthKey);
+
+        lineCanvas.__ladokppRender = renderLine;
+        modCanvas.__ladokppRender = renderMods;
+        termCanvas.__ladokppRender = renderTerm;
+        hpCanvas.__ladokppRender = renderMonthHp;
+
+        renderLine();
+        renderMods();
+        renderTerm();
+        renderMonthHp();
+        registerChartResizeHandler();
       }, 0);
     }
 
@@ -717,6 +728,24 @@
     }
     canvas.__ladokppTooltip = tip;
     return tip;
+  }
+
+  function registerChartResizeHandler() {
+    if (window.__ladokppResizeHandler) return;
+    let raf = 0;
+    const onResize = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const canvases = document.querySelectorAll("canvas");
+        canvases.forEach((c) => {
+          const render = c.__ladokppRender;
+          if (typeof render === "function") render();
+        });
+      });
+    };
+    window.addEventListener("resize", onResize, { passive: true });
+    window.__ladokppResizeHandler = onResize;
   }
 
   function setTooltip(tip, x, y, text) {
