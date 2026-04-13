@@ -1,6 +1,6 @@
-# Ladok++
+# L++
 
-Ladok++ is a browser extension that adds lightweight gamification and progress tracking to Ladok's student pages. It turns completed credits into XP, calculates a level curve, and shows extra study statistics directly on the "Min utbildning" view.
+L++ is a browser extension that adds lightweight gamification and progress tracking to Ladok's student pages. It turns completed credits into XP, calculates a level curve, and shows extra study statistics directly on the "Min utbildning" view.
 
 The project is currently a plain Manifest V3 extension with no build step. You load it unpacked in the browser, edit the source files directly, and reload the extension when you make changes.
 
