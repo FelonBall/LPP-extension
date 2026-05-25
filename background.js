@@ -2,6 +2,7 @@ const STORAGE_KEY = "ladokpp.courses"; // object: { [kursUID]: miniCourse }
 const TAB_THROTTLE_MS = 500; // Delay between opening tabs to avoid hammering the server
 const TAB_WAIT_FOR_COMPLETE_MS = 12000; // Max wait for a tab to finish loading
 const POST_COMPLETE_GRACE_MS = 900; // Give content scripts time to run before closing
+const SCAN_CONCURRENCY = 3; // Number of tabs to scan in parallel
 
 async function getCourses() {
   const r = await chrome.storage.local.get(STORAGE_KEY);
@@ -87,17 +88,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // Optional: open a list of URLs to trigger data collection
     if (msg?.type === "LADOKPP_SCAN_URLS") {
-      const urls = Array.isArray(msg.urls) ? msg.urls : [];
+      const queue = (Array.isArray(msg.urls) ? msg.urls : []).filter(u => typeof u === "string");
       let opened = 0;
 
-      // throttle: open sequentially to avoid overwhelming the server
-      for (const url of urls) {
-        if (typeof url !== "string") continue;
-        opened += 1;
-        await openTabCollectAndClose(url);
-        await new Promise((r) => setTimeout(r, TAB_THROTTLE_MS));
-      }
+      const worker = async () => {
+        while (queue.length > 0) {
+          const url = queue.shift();
+          opened++;
+          await openTabCollectAndClose(url);
+          if (queue.length > 0) await new Promise((r) => setTimeout(r, TAB_THROTTLE_MS));
+        }
+      };
 
+      await Promise.all(Array.from({ length: Math.min(SCAN_CONCURRENCY, queue.length) }, worker));
       sendResponse({ ok: true, opened });
       return;
     }
