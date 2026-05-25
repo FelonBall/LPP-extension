@@ -74,7 +74,6 @@ function extractMiniDataset(payload, kursUID) {
       .filter(Boolean)
       .sort((a, b) => (a.examDate ?? "").localeCompare(b.examDate ?? ""));
 
-    console.log("Ladok++ content script loaded");
     return {
       moduleCode: m.Kod ?? null,
       name: m.Utbildningsinstansbenamningar?.sv ?? m.Utbildningsinstansbenamningar?.en ?? "",
@@ -113,8 +112,6 @@ window.addEventListener("message", (event) => {
 
   // Never use / store msg.data.StudentUID etc — extractor ignores it.
   const mini = extractMiniDataset(msg.data, msg.kursUID);
-  console.log("Ladok++ content script loaded");
-
   if (!mini?.kursUID) return;
 
   chrome.runtime.sendMessage({

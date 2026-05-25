@@ -44,24 +44,27 @@ function writeForm(cfg) {
 }
 
 function setStatus(msg) {
-  $("status").textContent = msg;
-  if (msg) setTimeout(() => ($("status").textContent = ""), 1500);
+  const el = $("status");
+  el.textContent = msg;
+  el.classList.toggle("visible", !!msg);
+  if (msg) setTimeout(() => { el.textContent = ""; el.classList.remove("visible"); }, 1500);
 }
 
 async function load() {
-  await api.storage.sync.get(DEFAULTS, (cfg) => writeForm(cfg));
+  const cfg = await api.storage.sync.get(DEFAULTS);
+  writeForm(cfg);
 }
 
 async function save() {
   const cfg = readForm();
-  await api.storage.sync.set(cfg, () => setStatus("Sparat!"));
+  await api.storage.sync.set(cfg);
+  setStatus("Sparat!");
 }
 
 async function reset() {
-  await api.storage.sync.set(DEFAULTS, () => {
-    writeForm(DEFAULTS);
-    setStatus("Återställt!");
-  });
+  await api.storage.sync.set(DEFAULTS);
+  writeForm(DEFAULTS);
+  setStatus("Återställt!");
 }
 
 $("save").addEventListener("click", save);

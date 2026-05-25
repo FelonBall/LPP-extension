@@ -1,3 +1,4 @@
-examples
-lol.json
-old.js
+dev/
+test
+ladok-purge-playwright
+.claude/

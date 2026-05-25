@@ -345,13 +345,28 @@
     return DEFAULTS.allowedPathRegex.test(location.pathname);
   }
 
-  function rgbToRgba(rgb, alpha) {
-    const m = String(rgb).match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
-    if (!m) return `rgba(15, 23, 42, ${alpha})`;
+  function rgbToRgba(color, alpha) {
+    // Handle hex (#rrggbb or #rgb)
+    const hex = String(color).match(/^#([0-9a-f]{6}|[0-9a-f]{3})$/i);
+    if (hex) {
+      let h = hex[1];
+      if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+      const r = parseInt(h.slice(0, 2), 16);
+      const g = parseInt(h.slice(2, 4), 16);
+      const b = parseInt(h.slice(4, 6), 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+    // Handle rgb()/rgba()
+    const m = String(color).match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+    if (!m) return `rgba(225, 16, 82, ${alpha})`;
     return `rgba(${m[1]}, ${m[2]}, ${m[3]}, ${alpha})`;
   }
 
   function pickAccentColor() {
+    // Prefer Ladok's own brand color — always present, always correct, zero maintenance
+    const brand = getComputedStyle(document.documentElement).getPropertyValue("--ladok-brand-color").trim();
+    if (brand) return brand;
+    // Fall back to reading the active filter button's computed color
     const activeBtn =
       document.querySelector('button[aria-pressed="true"]') ||
       document.querySelector(".btn.active");
@@ -359,12 +374,16 @@
       const bg = getComputedStyle(activeBtn).backgroundColor;
       if (bg && !/rgba?\(0,\s*0,\s*0,\s*0\)/.test(bg)) return bg;
     }
-    return "rgb(15, 23, 42)";
+    return "rgb(225, 16, 82)"; // Ladok brand crimson fallback
   }
 
   // ---------------- Ladok hooks ----------------
   function getSummeringDl() {
-    return document.querySelector("ladok-poang-summeringar dl.ladok-dl-2");
+    return (
+      document.querySelector("ladok-poang-summeringar dl.ladok-dl-2") ||
+      document.querySelector("ladok-poang-summeringar dl") ||
+      document.querySelector("dl.ladok-dl-2")
+    );
   }
 
   function getCompletedHpSpan() {
@@ -375,22 +394,25 @@
   }
 
   function readTotalHp() {
-    const el = Array.from(document.querySelectorAll(".ladok-text-muted"))
-      .find((e) => /\bhp\b/i.test(e.textContent || ""));
+    // Try multiple selector patterns in case Ladok renames its CSS classes
+    const candidates = [
+      ...document.querySelectorAll(".ladok-text-muted"),
+      ...document.querySelectorAll(".text-muted"),
+    ];
+    const el = candidates.find((e) => /\bhp\b/i.test(e.textContent || ""));
     if (!el) return { totalHp: null, totalHpEl: null };
     const totalHp = parseHpFromText(el.textContent || "");
     return { totalHp, totalHpEl: el };
   }
 
-  // Return the actual clickable <a> element and its container <h2>
   function getProgramTitleAnchor() {
-    // Your snippet: <h2 class="card-title ..."><a class="card-link" href="..."><span>Title</span></a></h2>
     const a =
       document.querySelector("h2.card-title a.card-link") ||
-      document.querySelector("h2.card-title a");
+      document.querySelector("h2.card-title a") ||
+      document.querySelector(".card-title a") ||
+      document.querySelector("h2 a.card-link");
     if (!a) return { a: null, h2: null };
-
-    const h2 = a.closest("h2.card-title") || null;
+    const h2 = a.closest("h2") || null;
     return { a, h2 };
   }
 
@@ -669,13 +691,21 @@
       body.appendChild(midWrap);
       body.appendChild(termWrap);
 
-      // Render charts once added to DOM
-      setTimeout(() => {
+      const renderAllCharts = () => {
         renderLineChart(lineCanvas, series, accent, stats.currentMonthKey);
         renderBarChart(modCanvas, series, accent, stats.currentMonthKey);
         renderTermChart(termCanvas, termSeries, accent, stats.currentTermLabel);
         renderMonthHpChart(hpCanvas, stats.monthSeries || [], accent, stats.currentMonthKey);
-      }, 0);
+      };
+
+      // Re-render whenever the panel is opened (elements are hidden while closed,
+      // so getBoundingClientRect returns 0 and charts bail out early)
+      details.addEventListener("toggle", () => {
+        if (details.open) setTimeout(renderAllCharts, 0);
+      });
+
+      // Also attempt an initial render (no-ops if panel is closed)
+      setTimeout(renderAllCharts, 0);
     }
 
     details.appendChild(body);
@@ -1050,17 +1080,20 @@
     wrap.style.display = "grid";
     wrap.style.gap = epic ? "12px" : "8px";
     wrap.style.width = "100%";
-    wrap.style.padding = epic ? "max(14px, 2.6vw) max(14px, 3.2vw)" : "max(8px, 1.6vw) max(10px, 2.2vw)";
-    wrap.style.borderRadius = epic ? "max(18px, 2.2vw)" : "max(14px, 1.8vw)";
+    wrap.style.padding = epic ? "max(14px, 2.6vw) max(14px, 3.2vw)" : "1rem";
+    wrap.style.borderRadius = epic ? "max(18px, 2.2vw)" : "var(--bs-card-border-radius, 0.375rem)";
     wrap.style.boxSizing = "border-box";
-    wrap.style.border = `1px solid ${rgbToRgba(accent, 0.22)}`;
+    wrap.style.border = epic
+      ? `1px solid ${rgbToRgba(accent, 0.22)}`
+      : "1px solid var(--bs-border-color-translucent, rgba(0,0,0,.175))";
     wrap.style.background = epic
       ? `linear-gradient(180deg, rgba(255, 252, 245, 0.96), rgba(255,255,255,0.92))`
-      : `linear-gradient(180deg, ${rgbToRgba(accent, 0.14)}, rgba(255,255,255,0.93))`;
+      : "var(--bs-card-bg, #fff)";
     wrap.style.boxShadow = epic
       ? `0 22px 48px ${rgbToRgba(accent, 0.20)}, 0 0 0 1px rgba(255, 230, 150, 0.12) inset`
-      : `0 10px 22px ${rgbToRgba(accent, 0.10)}`;
-    wrap.style.fontFamily = "inherit";
+      : "none";
+    wrap.style.fontFamily = "var(--bs-body-font-family, inherit)";
+    wrap.style.color = "var(--bs-body-color, #222224)";
     wrap.style.boxSizing = "border-box";
 
     const layer = document.createElement("div");
@@ -1126,7 +1159,7 @@
     badge.style.color = epic ? "rgba(10, 12, 18, 0.92)" : "white";
     badge.style.background = epic
       ? `linear-gradient(135deg, rgba(255,246,210,1), rgba(255,210,120,1), rgba(255,245,200,1))`
-      : accent;
+      : `linear-gradient(135deg, ${accent}, ${rgbToRgba(accent, 0.78)})`;
     badge.style.padding = epic ? "12px 18px" : "10px 14px";
     badge.style.borderRadius = "999px";
     badge.style.whiteSpace = "nowrap";
@@ -1134,10 +1167,10 @@
     badge.style.lineHeight = "1";
     badge.style.border = epic
       ? "1px solid rgba(120, 78, 20, 0.35)"
-      : `1px solid ${rgbToRgba(accent, 0.15)}`;
+      : `1px solid ${rgbToRgba(accent, 0.12)}`;
     badge.style.boxShadow = epic
       ? "0 14px 30px rgba(255, 200, 110, 0.35), 0 2px 0 rgba(255,255,255,0.65) inset"
-      : `0 10px 24px ${rgbToRgba(accent, 0.28)}`;
+      : `0 6px 18px ${rgbToRgba(accent, 0.32)}, 0 1px 0 rgba(255,255,255,0.20) inset`;
 
     top.appendChild(left);
     top.appendChild(badge);
@@ -1166,10 +1199,12 @@
     bar.style.width = `${pct}%`;
     bar.style.background = epic
       ? `linear-gradient(90deg, rgba(255,225,145,1), rgba(255,190,90,1), rgba(255,245,200,1))`
-      : accent;
+      : `linear-gradient(90deg, ${accent} 0%, ${rgbToRgba(accent, 0.72)} 100%)`;
     bar.style.borderRadius = "999px";
-    bar.style.transition = "width 220ms ease";
-    bar.style.boxShadow = epic ? "0 10px 26px rgba(255, 200, 110, 0.45)" : "none";
+    bar.style.transition = "width 280ms cubic-bezier(0.34, 1.56, 0.64, 1)";
+    bar.style.boxShadow = epic
+      ? "0 10px 26px rgba(255, 200, 110, 0.45)"
+      : `0 2px 8px ${rgbToRgba(accent, 0.35)}`;
     barWrap.appendChild(bar);
 
     if (epic) {
@@ -1191,6 +1226,11 @@
       foot.style.gap = "14px";
       foot.style.fontSize = epic ? "15px" : "13px";
       foot.style.opacity = "0.95";
+      if (!epic) {
+        foot.style.borderTop = "1px solid var(--bs-border-color-translucent, rgba(0,0,0,.12))";
+        foot.style.paddingTop = "8px";
+        foot.style.color = "var(--bs-secondary-color, rgba(34,34,36,.75))";
+      }
 
       const l = document.createElement("div");
       l.textContent = `Mot lvl ${Math.min(100, level + 1)}`;
@@ -1219,7 +1259,7 @@
       extra.style.gap = "12px";
       extra.style.marginTop = epic ? "6px" : "4px";
       extra.style.fontSize = epic ? "14px" : "12px";
-      extra.style.opacity = "0.92";
+      extra.style.color = epic ? "inherit" : "var(--bs-secondary-color, rgba(34,34,36,.75))";
 
       const leftExtra = document.createElement("div");
       leftExtra.style.whiteSpace = "nowrap";
@@ -1242,12 +1282,16 @@
       btn.setAttribute("aria-label", extras.scanBusy ? "Scanning all courses" : "Scan all courses");
       btn.textContent = extras.scanBusy ? "Skannar…" : "Skanna alla";
       btn.disabled = !!extras.scanBusy;
-      btn.style.border = `1px solid ${rgbToRgba(accent, 0.20)}`;
-      btn.style.background = epic ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.85)";
-      btn.style.color = "inherit";
-      btn.style.borderRadius = "999px";
-      btn.style.padding = epic ? "8px 12px" : "6px 10px";
-      btn.style.fontWeight = "700";
+      btn.style.border = epic
+        ? `1px solid ${rgbToRgba(accent, 0.20)}`
+        : "1px solid var(--bs-border-color-translucent, rgba(0,0,0,.175))";
+      btn.style.background = epic ? "rgba(255,255,255,0.75)" : "var(--bs-card-bg, #fff)";
+      btn.style.color = "var(--bs-body-color, inherit)";
+      btn.style.borderRadius = "var(--bs-border-radius-pill, 999px)";
+      btn.style.padding = epic ? "8px 12px" : "5px 12px";
+      btn.style.fontFamily = "var(--bs-body-font-family, inherit)";
+      btn.style.fontSize = "inherit";
+      btn.style.fontWeight = "600";
       btn.style.cursor = btn.disabled ? "not-allowed" : "pointer";
       btn.style.whiteSpace = "nowrap";
 
@@ -1285,6 +1329,7 @@
       dd.style.margin = "";
       dd.style.padding = "";
       dd.style.width = "";
+      dd.style.flex = "";
     }
     if (span) span.style.display = "";
 
@@ -1305,6 +1350,7 @@
   let currentPath = location.pathname;
   let lastKey = null;
   let pathWatcherInterval = null;
+  let scanBusy = false;
 
   function schedule() {
     if (scheduled) return;
@@ -1357,6 +1403,7 @@
     dd.style.margin = "0";
     dd.style.padding = "0";
     dd.style.width = "100%";
+    dd.style.flex = "0 0 100%";
 
     attachHpObserver(span);
 
@@ -1378,15 +1425,15 @@
 
         // --- Ladok++: load saved per-course/module data ---
 
-    // Try to discover course URLs from the current page list
-    // (best effort: links that look like /min-utbildning/kurs/<uuid>)
+    // Discover course URLs from links on the page.
+    // Match by UUID pattern on the resolved pathname so we're robust to
+    // relative hrefs, full URLs, and minor Ladok path restructuring.
+    const COURSE_PATH_RX = /\/min-utbildning\/kurs\/[0-9a-f-]{36}/i;
     const courseUrlSet = new Set();
-    for (const a of Array.from(document.querySelectorAll('a[href*="/min-utbildning/kurs/"]'))) {
+    for (const a of Array.from(document.querySelectorAll("a[href]"))) {
       try {
-        const href = a.getAttribute("href");
-        if (!href) continue;
-        const u = new URL(href, location.origin);
-        if (u.pathname.includes("/student/app/studentwebb/min-utbildning/kurs/")) {
+        const u = new URL(a.getAttribute("href"), location.origin);
+        if (u.hostname === location.hostname && COURSE_PATH_RX.test(u.pathname)) {
           courseUrlSet.add(u.toString());
         }
       } catch {}
@@ -1396,7 +1443,6 @@
     // Count how many courses exist on the list page (rough proxy: number of unique course links)
     const listCourseCount = courseUrls.length || null;
 
-    let scanBusy = false;
     const onScanAll = async () => {
       if (scanBusy) return;
       scanBusy = true;
