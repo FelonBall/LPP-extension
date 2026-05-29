@@ -100,8 +100,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       };
 
-      await Promise.all(Array.from({ length: Math.min(SCAN_CONCURRENCY, queue.length) }, worker));
-      sendResponse({ ok: true, opened });
+      // Stagger worker starts by TAB_THROTTLE_MS so the first tabs don't all open
+      // simultaneously when queue.length <= SCAN_CONCURRENCY.
+      const workerCount = Math.min(SCAN_CONCURRENCY, queue.length);
+      const workers = Array.from({ length: workerCount }, (_, i) =>
+        new Promise((r) => setTimeout(r, i * TAB_THROTTLE_MS)).then(worker)
+      );
+      try {
+        await Promise.all(workers);
+        sendResponse({ ok: true, opened });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err) });
+      }
       return;
     }
 

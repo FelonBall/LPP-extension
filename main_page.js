@@ -220,6 +220,7 @@
     const courses = Object.values(savedCoursesObj || {});
     const monthMap = new Map(); // key -> { credits, modules }
     const termMap = new Map(); // key -> { credits, modules, date }
+    const dayMap = new Map();  // "YYYY-MM-DD" -> { credits, date }
     const now = new Date();
     const currentMonthKey = monthKey(now);
     const currentTerm = getTermRange(now, cfg);
@@ -245,6 +246,11 @@
         cur.modules += 1;
         monthMap.set(key, cur);
 
+        const dk = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+        const dcur = dayMap.get(dk) || { credits: 0, date: new Date(d.getFullYear(), d.getMonth(), d.getDate()) };
+        dcur.credits += credits;
+        dayMap.set(dk, dcur);
+
         const tKey = termKey(d, cfg);
         const tRange = getTermRange(d, cfg);
         const tDate = tRange.start;
@@ -267,6 +273,11 @@
             cur.credits += credits;
             monthMap.set(key, cur);
 
+            const dk = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+            const dcur = dayMap.get(dk) || { credits: 0, date: new Date(d.getFullYear(), d.getMonth(), d.getDate()) };
+            dcur.credits += credits;
+            dayMap.set(dk, dcur);
+
             const tKey = termKey(d, cfg);
             const tRange = getTermRange(d, cfg);
             const tDate = tRange.start;
@@ -280,6 +291,7 @@
 
     const rows = Array.from(monthMap.values()).sort((a, b) => a.date - b.date);
     const termRows = Array.from(termMap.values()).sort((a, b) => a.date - b.date);
+    const dayRows = Array.from(dayMap.values()).sort((a, b) => a.date - b.date);
     let cumulative = 0;
     const series = rows.map((r) => {
       cumulative += r.credits;
@@ -303,10 +315,17 @@
       label: r.label
     }));
 
+    let dayCumulative = 0;
+    const daySeries = dayRows.map(r => {
+      dayCumulative += r.credits;
+      return { date: r.date, credits: r.credits, cumulative: dayCumulative };
+    });
+
     return {
       series,
       monthSeries,
       termSeries,
+      daySeries,
       hasData: courses.length > 0,
       currentMonthKey,
       currentTermLabel: currentTerm.label
@@ -365,7 +384,15 @@
   function pickAccentColor() {
     // Prefer Ladok's own brand color — always present, always correct, zero maintenance
     const brand = getComputedStyle(document.documentElement).getPropertyValue("--ladok-brand-color").trim();
-    if (brand) return brand;
+    if (brand) {
+      // Resolve any CSS color format (hsl, named, oklch…) to rgb() so rgbToRgba can parse it.
+      const tmp = document.createElement("span");
+      tmp.style.color = brand;
+      document.documentElement.appendChild(tmp);
+      const resolved = getComputedStyle(tmp).color;
+      tmp.remove();
+      if (resolved && !/rgba?\(0,\s*0,\s*0,\s*0\)/.test(resolved)) return resolved;
+    }
     // Fall back to reading the active filter button's computed color
     const activeBtn =
       document.querySelector('button[aria-pressed="true"]') ||
@@ -381,8 +408,7 @@
   function getSummeringDl() {
     return (
       document.querySelector("ladok-poang-summeringar dl.ladok-dl-2") ||
-      document.querySelector("ladok-poang-summeringar dl") ||
-      document.querySelector("dl.ladok-dl-2")
+      document.querySelector("ladok-poang-summeringar dl")
     );
   }
 
@@ -395,11 +421,8 @@
 
   function readTotalHp() {
     // Try multiple selector patterns in case Ladok renames its CSS classes
-    const candidates = [
-      ...document.querySelectorAll(".ladok-text-muted"),
-      ...document.querySelectorAll(".text-muted"),
-    ];
-    const el = candidates.find((e) => /\bhp\b/i.test(e.textContent || ""));
+    const el = Array.from(document.querySelectorAll(".ladok-text-muted, .text-muted"))
+      .find((e) => /\bhp\b/i.test(e.textContent || ""));
     if (!el) return { totalHp: null, totalHpEl: null };
     const totalHp = parseHpFromText(el.textContent || "");
     return { totalHp, totalHpEl: el };
@@ -412,7 +435,7 @@
       document.querySelector(".card-title a") ||
       document.querySelector("h2 a.card-link");
     if (!a) return { a: null, h2: null };
-    const h2 = a.closest("h2") || null;
+    const h2 = a.closest("h2.card-title") || null;
     return { a, h2 };
   }
 
@@ -540,7 +563,7 @@
     if (style) style.remove();
   }
 
-  function renderStatsPanel(stats, accent, epic) {
+  function renderStatsPanel(stats, accent, epic, cfg) {
     const wrap = document.createElement("div");
     wrap.style.display = "grid";
     wrap.style.gap = "10px";
@@ -585,7 +608,7 @@
 
       const lineCanvas = document.createElement("canvas");
       lineCanvas.style.width = "100%";
-      lineCanvas.style.height = "160px";
+      lineCanvas.style.height = "200px";
       lineCanvas.style.borderRadius = "12px";
       lineCanvas.style.background = epic ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.8)";
       lineCanvas.style.border = `1px solid ${rgbToRgba(accent, 0.18)}`;
@@ -692,7 +715,7 @@
       body.appendChild(termWrap);
 
       const renderAllCharts = () => {
-        renderLineChart(lineCanvas, series, accent, stats.currentMonthKey);
+        renderLineChart(lineCanvas, stats.daySeries || series, accent, stats.currentMonthKey, cfg);
         renderBarChart(modCanvas, series, accent, stats.currentMonthKey);
         renderTermChart(termCanvas, termSeries, accent, stats.currentTermLabel);
         renderMonthHpChart(hpCanvas, stats.monthSeries || [], accent, stats.currentMonthKey);
@@ -765,14 +788,21 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   }
 
-  function renderLineChart(canvas, series, accent, currentMonthKey) {
-    const { ctx, width, height } = resizeCanvas(canvas, 160);
+  function renderLineChart(canvas, series, accent, currentMonthKey, cfg) {
+    const { ctx, width, height } = resizeCanvas(canvas, 200);
     ctx.clearRect(0, 0, width, height);
 
     const pad = { l: 36, r: 12, t: 12, b: 24 };
     const plotW = width - pad.l - pad.r;
     const plotH = height - pad.t - pad.b;
     if (plotW <= 0 || plotH <= 0) return;
+    if (!series || series.length === 0) return;
+
+    // Time-proportional x positioning — no fill logic needed, gaps are honest by default
+    const minT = series[0].date.getTime();
+    const maxT = series[series.length - 1].date.getTime();
+    const timeRange = Math.max(1, maxT - minT);
+    const xOf = (d) => pad.l + ((d.getTime() - minT) / timeRange) * plotW;
 
     const maxY = Math.max(1, ...series.map(s => s.cumulative));
     const gridLines = 4;
@@ -786,40 +816,83 @@
       ctx.stroke();
     }
 
-    ctx.fillStyle = "rgba(15, 23, 42, 0.7)";
-    ctx.font = "11px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+    // Y-axis label at every grid line
+    ctx.fillStyle = "rgba(15, 23, 42, 0.55)";
+    ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
-    ctx.fillText("0", pad.l - 6, pad.t + plotH);
-    ctx.fillText(String(Math.round(maxY)), pad.l - 6, pad.t + 4);
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText("HP", pad.l + 2, pad.t + 2);
+    for (let i = 0; i <= gridLines; i += 1) {
+      const val = Math.round(maxY * (1 - i / gridLines));
+      const y = pad.t + (i / gridLines) * plotH;
+      ctx.fillText(String(val), pad.l - 4, y);
+    }
 
+    // Term boundary vertical guide lines (walk months, time-scaled)
+    if (cfg && series.length > 1) {
+      const termBoundaries = [];
+      let bCur = new Date(series[0].date.getFullYear(), series[0].date.getMonth(), 1);
+      const bEnd = series[series.length - 1].date;
+      let prevTermLabel = null;
+      while (bCur <= bEnd) {
+        const lbl = getTermRange(bCur, cfg).label;
+        if (prevTermLabel !== null && lbl !== prevTermLabel) {
+          const bm = lbl.match(/^(\d{4})\s+(\S+)/);
+          const compact = bm
+            ? (bm[2] === "Sommar" ? `S${bm[1].slice(2)}` : `${bm[2]}${bm[1].slice(2)}`)
+            : lbl;
+          termBoundaries.push({ x: xOf(bCur), compact });
+        }
+        prevTermLabel = lbl;
+        bCur = new Date(bCur.getFullYear(), bCur.getMonth() + 1, 1);
+      }
+
+      ctx.strokeStyle = "rgba(15, 23, 42, 0.1)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      for (const b of termBoundaries) {
+        ctx.beginPath();
+        ctx.moveTo(b.x, pad.t);
+        ctx.lineTo(b.x, pad.t + plotH);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = "rgba(15, 23, 42, 0.3)";
+      ctx.font = "9px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      for (const b of termBoundaries) {
+        ctx.fillText(b.compact, b.x + 2, pad.t + 2);
+      }
+    }
+
+    // Step line: horizontal to new x at previous y, then vertical to new y
     ctx.strokeStyle = accent;
     ctx.lineWidth = 2;
     ctx.beginPath();
     const points = [];
     series.forEach((s, i) => {
-      const x = pad.l + (i / Math.max(1, series.length - 1)) * plotW;
+      const x = xOf(s.date);
       const y = pad.t + plotH - (s.cumulative / maxY) * plotH;
       points.push({ x, y, data: s });
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, points[i - 1].y);
+        ctx.lineTo(x, y);
+      }
     });
     ctx.stroke();
 
-    ctx.fillStyle = accent;
-    points.forEach((p) => {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
+    // Current-month highlight
     if (currentMonthKey) {
-      const idx = series.findIndex(s => fmtMonth(s.date) === currentMonthKey);
-      if (idx >= 0) {
-        const x = pad.l + (idx / Math.max(1, series.length - 1)) * plotW;
+      const monthStart = new Date(
+        parseInt(currentMonthKey.slice(0, 4), 10),
+        parseInt(currentMonthKey.slice(5, 7), 10) - 1,
+        1
+      );
+      if (monthStart.getTime() >= minT && monthStart.getTime() <= maxT) {
+        const x = xOf(monthStart);
         ctx.strokeStyle = "rgba(15, 23, 42, 0.18)";
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -829,28 +902,15 @@
       }
     }
 
-    const last = series[series.length - 1];
-    const first = series[0];
-    const fmt = (d) => fmtMonth(d);
     ctx.fillStyle = "rgba(15, 23, 42, 0.6)";
     ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    ctx.fillText(fmt(first.date), pad.l, pad.t + plotH + 6);
+    ctx.fillText(fmtMonth(series[0].date), pad.l, pad.t + plotH + 6);
     ctx.textAlign = "right";
-    ctx.fillText(fmt(last.date), pad.l + plotW, pad.t + plotH + 6);
+    ctx.fillText(fmtMonth(series[series.length - 1].date), pad.l + plotW, pad.t + plotH + 6);
 
-    // Label last point value
-    const lastPoint = points[points.length - 1];
-    if (lastPoint) {
-      ctx.fillStyle = accent;
-      ctx.font = "11px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillText(`${formatHp(last.cumulative)} HP`, lastPoint.x + 6, lastPoint.y);
-    }
-
-    // Hover tooltip
+    // Hover tooltip — shows full date at day precision
     canvas.__ladokppLine = { points, pad, plotW, plotH };
     const tip = ensureTooltip(canvas);
     if (!canvas.__ladokppLineBound) {
@@ -858,20 +918,17 @@
       canvas.addEventListener("mousemove", (e) => {
         const rect = canvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
         const data = canvas.__ladokppLine;
         if (!data || !data.points?.length) return;
         let best = data.points[0];
         let bestDx = Math.abs(x - best.x);
         for (const p of data.points) {
           const dx = Math.abs(x - p.x);
-          if (dx < bestDx) {
-            best = p;
-            bestDx = dx;
-          }
+          if (dx < bestDx) { best = p; bestDx = dx; }
         }
-        const label = `${fmtMonth(best.data.date)} • ${formatHp(best.data.cumulative)} HP`;
-        setTooltip(tip, best.x, best.y, label);
+        const d = best.data.date;
+        const dayStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+        setTooltip(tip, best.x, best.y, `${dayStr} • ${formatHp(best.data.cumulative)} HP`);
       });
       canvas.addEventListener("mouseleave", () => hideTooltip(tip));
     }
@@ -1094,7 +1151,6 @@
       : "none";
     wrap.style.fontFamily = "var(--bs-body-font-family, inherit)";
     wrap.style.color = "var(--bs-body-color, #222224)";
-    wrap.style.boxSizing = "border-box";
 
     const layer = document.createElement("div");
     layer.className = "sq-layer";
@@ -1306,7 +1362,7 @@
     }
 
     if (extras?.stats && cfg.showStats) {
-      const statsPanel = renderStatsPanel(extras.stats, accent, epic);
+      const statsPanel = renderStatsPanel(extras.stats, accent, epic, cfg);
       layer.appendChild(statsPanel);
     }
 
