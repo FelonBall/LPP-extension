@@ -784,6 +784,13 @@
     if (tip) tip.style.opacity = "0";
   }
 
+  function niceStep(maxVal, targetLines = 3) {
+    if (maxVal <= 0) return 1;
+    const raw = maxVal / targetLines;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    return [1, 2, 5, 10].map(f => f * mag).find(s => s >= raw) ?? mag * 10;
+  }
+
   function fmtMonth(d) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   }
@@ -938,21 +945,50 @@
     const { ctx, width, height } = resizeCanvas(canvas, 110);
     ctx.clearRect(0, 0, width, height);
 
-    const pad = { l: 28, r: 10, t: 10, b: 20 };
+    const pad = { l: 34, r: 10, t: 10, b: 20 };
     const plotW = width - pad.l - pad.r;
     const plotH = height - pad.t - pad.b;
     if (plotW <= 0 || plotH <= 0) return;
+    if (!series || series.length === 0) return;
 
-    const maxY = Math.max(1, ...series.map(s => s.modules));
-    const barCount = series.length;
+    // Fill every month in range with zeros for inactive months
+    const byMonth = new Map(series.map(s => [fmtMonth(s.date), s]));
+    const filled = [];
+    let cur = new Date(series[0].date.getFullYear(), series[0].date.getMonth(), 1);
+    const endDate = new Date(series[series.length - 1].date.getFullYear(), series[series.length - 1].date.getMonth(), 1);
+    while (cur <= endDate) {
+      const key = fmtMonth(cur);
+      filled.push(byMonth.get(key) ?? { date: new Date(cur), credits: 0, modules: 0 });
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    }
+
+    const maxY = Math.max(1, ...filled.map(s => s.modules));
+    const barCount = filled.length;
     const barGap = 6;
     const barW = Math.max(6, (plotW - barGap * (barCount - 1)) / barCount);
+
+    // Horizontal grid lines
+    const step = niceStep(maxY);
+    ctx.strokeStyle = "rgba(15, 23, 42, 0.08)";
+    ctx.lineWidth = 1;
+    ctx.fillStyle = "rgba(15, 23, 42, 0.45)";
+    ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let v = step; v <= maxY; v += step) {
+      const gy = pad.t + plotH - (v / maxY) * plotH;
+      ctx.beginPath();
+      ctx.moveTo(pad.l, gy);
+      ctx.lineTo(pad.l + plotW, gy);
+      ctx.stroke();
+      ctx.fillText(String(v), pad.l - 4, gy);
+    }
 
     ctx.fillStyle = "rgba(15, 23, 42, 0.12)";
     ctx.fillRect(pad.l, pad.t + plotH, plotW, 1);
 
     const bars = [];
-    series.forEach((s, i) => {
+    filled.forEach((s, i) => {
       const h = (s.modules / maxY) * plotH;
       const x = pad.l + i * (barW + barGap);
       const y = pad.t + plotH - h;
@@ -966,14 +1002,11 @@
     ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    const first = series[0];
-    const last = series[series.length - 1];
-    const fmt = (d) => fmtMonth(d);
-    ctx.fillText(fmt(first.date), pad.l, pad.t + plotH + 6);
+    ctx.fillText(fmtMonth(filled[0].date), pad.l, pad.t + plotH + 6);
     ctx.textAlign = "right";
-    ctx.fillText(fmt(last.date), pad.l + plotW, pad.t + plotH + 6);
+    ctx.fillText(fmtMonth(filled[filled.length - 1].date), pad.l + plotW, pad.t + plotH + 6);
 
-    // Hover tooltip
+    // Hover tooltip — extended hit area for zero-height bars
     canvas.__ladokppBars = { bars };
     const tip = ensureTooltip(canvas);
     if (!canvas.__ladokppBarsBound) {
@@ -984,7 +1017,11 @@
         const y = e.clientY - rect.top;
         const data = canvas.__ladokppBars;
         if (!data || !data.bars?.length) return;
-        const hit = data.bars.find(b => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
+        const hit = data.bars.find(b => {
+          const hitH = Math.max(b.h, 8);
+          const hitY = b.y + b.h - hitH;
+          return x >= b.x && x <= b.x + b.w && y >= hitY && y <= hitY + hitH;
+        });
         if (!hit) return;
         const label = `${fmtMonth(hit.data.date)} • ${hit.data.modules} moduler`;
         setTooltip(tip, hit.x + hit.w / 2, hit.y, label);
@@ -1062,16 +1099,44 @@
     if (plotW <= 0 || plotH <= 0) return;
     if (!series || series.length === 0) return;
 
-    const maxY = Math.max(1, ...series.map(s => s.credits));
-    const barCount = series.length;
+    // Fill every month in range with zeros for inactive months
+    const byMonth = new Map(series.map(s => [fmtMonth(s.date), s]));
+    const filled = [];
+    let cur = new Date(series[0].date.getFullYear(), series[0].date.getMonth(), 1);
+    const endDate = new Date(series[series.length - 1].date.getFullYear(), series[series.length - 1].date.getMonth(), 1);
+    while (cur <= endDate) {
+      const key = fmtMonth(cur);
+      filled.push(byMonth.get(key) ?? { date: new Date(cur), credits: 0 });
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    }
+
+    const maxY = Math.max(1, ...filled.map(s => s.credits));
+    const barCount = filled.length;
     const barGap = 6;
     const barW = Math.max(8, (plotW - barGap * (barCount - 1)) / barCount);
+
+    // Horizontal grid lines
+    const step = niceStep(maxY);
+    ctx.strokeStyle = "rgba(15, 23, 42, 0.08)";
+    ctx.lineWidth = 1;
+    ctx.fillStyle = "rgba(15, 23, 42, 0.45)";
+    ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let v = step; v <= maxY; v += step) {
+      const gy = pad.t + plotH - (v / maxY) * plotH;
+      ctx.beginPath();
+      ctx.moveTo(pad.l, gy);
+      ctx.lineTo(pad.l + plotW, gy);
+      ctx.stroke();
+      ctx.fillText(formatHp(v), pad.l - 4, gy);
+    }
 
     ctx.fillStyle = "rgba(15, 23, 42, 0.12)";
     ctx.fillRect(pad.l, pad.t + plotH, plotW, 1);
 
     const bars = [];
-    series.forEach((s, i) => {
+    filled.forEach((s, i) => {
       const h = (s.credits / maxY) * plotH;
       const x = pad.l + i * (barW + barGap);
       const y = pad.t + plotH - h;
@@ -1085,12 +1150,11 @@
     ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    const first = series[0];
-    const last = series[series.length - 1];
-    ctx.fillText(fmtMonth(first.date), pad.l, pad.t + plotH + 6);
+    ctx.fillText(fmtMonth(filled[0].date), pad.l, pad.t + plotH + 6);
     ctx.textAlign = "right";
-    ctx.fillText(fmtMonth(last.date), pad.l + plotW, pad.t + plotH + 6);
+    ctx.fillText(fmtMonth(filled[filled.length - 1].date), pad.l + plotW, pad.t + plotH + 6);
 
+    // Hover tooltip — extended hit area for zero-height bars
     canvas.__ladokppMonthHp = { bars };
     const tip = ensureTooltip(canvas);
     if (!canvas.__ladokppMonthHpBound) {
@@ -1101,7 +1165,11 @@
         const y = e.clientY - rect.top;
         const data = canvas.__ladokppMonthHp;
         if (!data || !data.bars?.length) return;
-        const hit = data.bars.find(b => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
+        const hit = data.bars.find(b => {
+          const hitH = Math.max(b.h, 8);
+          const hitY = b.y + b.h - hitH;
+          return x >= b.x && x <= b.x + b.w && y >= hitY && y <= hitY + hitH;
+        });
         if (!hit) return;
         const label = `${fmtMonth(hit.data.date)} • ${formatHp(hit.data.credits)} HP`;
         setTooltip(tip, hit.x + hit.w / 2, hit.y, label);
