@@ -3,6 +3,7 @@
   const RX_PRIMARY = /\/student\/proxy\/(?:\d+\/)?resultat\/internal\/studentenskurser\/egenkursinformation\/student\/[0-9a-f-]{36}\/kursUID\/[0-9a-f-]{36}/i;
   // Fallback: any path that has egenkursinformation and a kursUID segment (survives minor API restructuring)
   const RX_FALLBACK = /\/egenkursinformation\/.*\/kursUID\/[0-9a-f-]{36}/i;
+  const TARGET_ORIGIN = window.location.origin;
 
   function shouldCapture(url) {
     try {
@@ -39,7 +40,7 @@
             kursUID,
             data
           },
-          "*"
+          TARGET_ORIGIN
         );
       }
     } catch (err) {
@@ -78,7 +79,7 @@
             kursUID,
             data
           },
-          "*"
+          TARGET_ORIGIN
         );
       } catch (err) {
         if (err instanceof SyntaxError) {
