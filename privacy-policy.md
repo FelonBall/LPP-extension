@@ -1,6 +1,6 @@
 # Integritetspolicy – L++
 
-_Senast uppdaterad: 27 januari 2026_
+_Senast uppdaterad: 7 augusti 2026_
 
 L++ är ett fristående webbläsartillägg som visar studieframsteg i Ladok. Vi värnar om din integritet.
 
