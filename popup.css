@@ -7,6 +7,8 @@
   --text-muted: rgba(15, 23, 42, 0.50);
   --primary: #0f172a;
   --primary-hover: #1e293b;
+  --danger: #b42318;
+  --danger-hover: #912018;
   --radius: 14px;
   --radius-sm: 10px;
 }
@@ -108,6 +110,83 @@ body {
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 6px;
+}
+
+/* ── Clear data ───────────────────────────────────── */
+.card-foot {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.link-danger {
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--danger);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-danger:hover { color: var(--danger-hover); }
+
+.link-danger:focus-visible {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.confirm {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.confirm-text {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.confirm-text strong { color: var(--text); }
+
+.confirm-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.confirm-actions button {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ghost {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.ghost:hover { border-color: rgba(15, 23, 42, 0.2); }
+
+.danger {
+  border: 0;
+  background: var(--danger);
+  color: #fff;
+}
+
+.danger:hover { background: var(--danger-hover); }
+
+.confirm-actions button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 /* ── Actions ──────────────────────────────────────── */

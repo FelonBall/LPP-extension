@@ -28,8 +28,23 @@
       </div>
       <p id="lastSeen" class="meta"></p>
       <p id="emptyHint" class="meta hidden">
-        Öppna Min utbildning och kör <strong>Skanna alla</strong> för att samla in resultatdata.
+        Öppna Min utbildning och kör <strong>Skanna alla</strong> för att hämta dina resultat.
       </p>
+
+      <div id="clearRow" class="card-foot hidden">
+        <button id="clearBtn" class="link-danger">Rensa sparad data</button>
+      </div>
+
+      <div id="confirmRow" class="confirm hidden">
+        <p class="confirm-text">
+          Ta bort resultatdata för <strong id="confirmCount"></strong>?
+          Inställningarna påverkas inte.
+        </p>
+        <div class="confirm-actions">
+          <button id="cancelClear" class="ghost">Avbryt</button>
+          <button id="confirmClear" class="danger">Ta bort</button>
+        </div>
+      </div>
     </section>
 
     <div class="actions">

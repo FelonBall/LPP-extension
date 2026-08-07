@@ -445,26 +445,27 @@
   }
 
   // --------------- progression math -----------
-  // Converts HP (credits) to XP and calculates level from XP using exponential curve.
-  // The levelExponent controls curve shape:
-  //   <1.2: steeper early game (levels come fast at start)
-  //   1.2-2.0: smooth progression (recommended range)
-  //   >2.0: back-loaded (hard to level early, speed up late)
+  // Converts HP (credits) to XP and maps XP to a level. Levels run 0–100: level 0
+  // is zero credits and level 100 is a finished programme, so there are exactly
+  // 100 intervals and at exponent 1.0 the level *is* percent complete.
+  //
+  // Level L sits at (L/100)^levelExponent of the programme's total XP, so a
+  // HIGHER exponent lowers the early thresholds and levels arrive faster:
+  //   1.0: linear — level tracks percent of the programme exactly
+  //   3.0: steeply front-loaded — level 46 after 10% of the programme
   function makeProgression(totalHp, cfg) {
     const xpPerHp = 100;
     const levelCap = 100;
     const xpTotal = Math.round(totalHp * xpPerHp);
 
     function xpRequiredForLevel(level) {
-      // Apply exponential curve: level 1 = 0 XP, level 100 = xpTotal XP
-      const L = clamp(level, 1, levelCap);
-      const t = (L - 1) / (levelCap - 1);
-      return xpTotal * Math.pow(t, cfg.levelExponent);
+      const L = clamp(level, 0, levelCap);
+      return xpTotal * Math.pow(L / levelCap, cfg.levelExponent);
     }
 
     function levelFromXp(xp) {
       const x = clamp(xp, 0, xpTotal);
-      let lo = 1,
+      let lo = 0,
         hi = levelCap;
       while (lo < hi) {
         const mid = Math.ceil((lo + hi) / 2);
@@ -1223,7 +1224,7 @@
     const level = prog.levelFromXp(xp);
 
     const xpThis = prog.xpRequiredForLevel(level);
-    const xpNext = prog.xpRequiredForLevel(Math.min(100, level + 1));
+    const xpNext = prog.xpRequiredForLevel(Math.min(prog.levelCap, level + 1));
     const into = xp - xpThis;
     const span = Math.max(1, xpNext - xpThis);
     const pct = clamp((into / span) * 100, 0, 100);

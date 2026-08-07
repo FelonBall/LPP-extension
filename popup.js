@@ -15,23 +15,24 @@ function formatLastSeen(iso) {
   return d.toLocaleDateString("sv-SE");
 }
 
+const show = (id, visible) =>
+  document.getElementById(id).classList.toggle("hidden", !visible);
+
 async function render() {
   const stored = await chrome.storage.local.get(STORAGE_KEY);
   const courses = Object.values(stored[STORAGE_KEY] ?? {});
+  const hasData = courses.length > 0;
 
   document.getElementById("courseCount").textContent = courses.length;
+  document.getElementById("confirmCount").textContent =
+    `${courses.length} ${courses.length === 1 ? "kurs" : "kurser"}`;
 
-  const lastSeenEl = document.getElementById("lastSeen");
-  const emptyHintEl = document.getElementById("emptyHint");
+  show("emptyHint", !hasData);
+  show("lastSeen", hasData);
+  show("clearRow", hasData);
+  show("confirmRow", false);
 
-  if (courses.length === 0) {
-    lastSeenEl.classList.add("hidden");
-    emptyHintEl.classList.remove("hidden");
-    return;
-  }
-
-  emptyHintEl.classList.add("hidden");
-  lastSeenEl.classList.remove("hidden");
+  if (!hasData) return;
 
   const latest = courses
     .map(c => c?.lastSeenAt)
@@ -40,8 +41,28 @@ async function render() {
     .at(-1);
 
   const when = latest ? formatLastSeen(latest) : null;
-  lastSeenEl.textContent = when ? `Senast uppdaterad ${when}` : "";
+  document.getElementById("lastSeen").textContent =
+    when ? `Senast uppdaterad ${when}` : "";
 }
+
+// Two-step confirm: the popup is one click from the toolbar, so a single
+// misclick should not wipe a full scan.
+document.getElementById("clearBtn").addEventListener("click", () => {
+  show("clearRow", false);
+  show("confirmRow", true);
+  document.getElementById("cancelClear").focus();
+});
+
+document.getElementById("cancelClear").addEventListener("click", () => {
+  show("confirmRow", false);
+  show("clearRow", true);
+});
+
+document.getElementById("confirmClear").addEventListener("click", async () => {
+  // Only the collected course data — settings live in storage.sync and stay.
+  await chrome.storage.local.remove(STORAGE_KEY);
+  await render();
+});
 
 document.getElementById("openOptions").addEventListener("click", () => {
   chrome.runtime.openOptionsPage();
