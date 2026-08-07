@@ -3,102 +3,131 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Ladok++ – Inställningar</title>
+    <title>L++ — Inställningar</title>
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
     <main class="wrap">
+
       <header class="header">
-        <h1>Ladok++</h1>
-        <p>Inställningar för level-kurva och visning.</p>
+        <div class="header-inner">
+          <img class="header-logo" src="favicon-ladok.png" alt="" />
+          <div>
+            <h1>L++</h1>
+            <p>Ladok med XP, levels och statistik</p>
+          </div>
+        </div>
       </header>
 
       <section class="card">
-        <h2>Progression</h2>
-
-        <label>
-          <span>Level-exponent (kurva)</span>
+        <div class="card-title"><span>⚡</span> Progression</div>
+        <div class="field">
+          <label class="field-label" for="levelExponent">Level-exponent</label>
           <input id="levelExponent" type="number" min="1" max="3" step="0.05" />
-        </label>
-
-        <div class="hint" style="margin-top: 12px;">
-          <strong>Tips:</strong> Lägre exponent = snabbare nivåer i början.<br>
-          Högre = jämnare fördelning. Standard: <code>1.2</code>
+          <p class="field-hint">
+            Styr hur snabbt du level:ar. Lägre = snabbare tidiga nivåer, högre = jämnare fördelning längs hela utbildningen. Standard: <code>1.2</code>
+          </p>
         </div>
       </section>
 
       <section class="card">
-        <h2>Visning</h2>
+        <div class="card-title"><span>👁</span> Visning</div>
 
-        <label class="check">
-          <input id="hideLabel" type="checkbox" />
-          <span>Göm "Summering resultat:"</span>
-        </label>
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-name">Göm rubrik</div>
+            <div class="toggle-desc">Döljer "Summering resultat:" på Ladok-sidan</div>
+          </div>
+          <label class="toggle-switch">
+            <input id="hideLabel" type="checkbox" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
 
-        <label class="check">
-          <input id="showXpToNext" type="checkbox" />
-          <span>Visa XP till nästa level</span>
-        </label>
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-name">XP till nästa level</div>
+            <div class="toggle-desc">Visa en progressrad med exakt XP-antal under stapeln</div>
+          </div>
+          <label class="toggle-switch">
+            <input id="showXpToNext" type="checkbox" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
 
-        <label class="check">
-          <input id="epicMode" type="checkbox" />
-          <span>Legendary mode ✨ (guld, glow, shimmer)</span>
-        </label>
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-name">Legendary mode ✨</div>
+            <div class="toggle-desc">Guld-gradient, glow och shimmer-effekter</div>
+          </div>
+          <label class="toggle-switch">
+            <input id="epicMode" type="checkbox" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
       </section>
 
       <section class="card">
-        <h2>Statistik</h2>
+        <div class="card-title"><span>📊</span> Statistik</div>
 
-        <label class="check">
-          <input id="showStats" type="checkbox" />
-          <span>Visa statistikpanelen</span>
-        </label>
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-name">Visa statistikpanel</div>
+            <div class="toggle-desc">Grafer för HP över tid, per månad och per termin</div>
+          </div>
+          <label class="toggle-switch">
+            <input id="showStats" type="checkbox" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
 
-        <details style="margin-top: 10px;">
-          <summary style="cursor: pointer; font-size: 13px; font-weight: 700;">Avancerat</summary>
-
-          <div style="margin-top: 10px;">
-            <label>
-              <span>Termgränser</span>
+        <details>
+          <summary class="advanced-summary">
+            <span class="chevron">▸</span> Avancerat
+          </summary>
+          <div class="advanced-body">
+            <div class="field">
+              <label class="field-label" for="termBoundaryMode">Termgränser</label>
               <select id="termBoundaryMode">
                 <option value="week">Veckobaserat (HT v36–03, VT v04–23)</option>
                 <option value="fixed">Fasta datum (HT 1 sep–18 jan, VT 19 jan–7 jun)</option>
               </select>
-            </label>
-          </div>
+            </div>
 
-          <div style="margin-top: 10px;">
-            <label>
-              <span>Akademiskt år startvecka (HT-start)</span>
+            <div class="field">
+              <label class="field-label" for="academicYearStartWeek">Läsårets startvecka (HT-start)</label>
               <input id="academicYearStartWeek" type="number" min="1" max="53" step="1" />
-            </label>
-          </div>
+            </div>
 
-          <label class="check" style="margin-top: 8px;">
-            <input id="includeSummerWeeks" type="checkbox" />
-            <span>Inkludera sommarveckor i VT</span>
-          </label>
+            <div class="toggle-row" style="padding-top: 0; border-bottom: none;">
+              <div class="toggle-info">
+                <div class="toggle-name">Inkludera sommarveckor i VT</div>
+              </div>
+              <label class="toggle-switch">
+                <input id="includeSummerWeeks" type="checkbox" />
+                <span class="toggle-track"></span>
+              </label>
+            </div>
 
-          <div style="margin-top: 10px;">
-            <label>
-              <span>Datumbas för statistik</span>
+            <div class="field">
+              <label class="field-label" for="dateBasis">Datumbas för statistik</label>
               <select id="dateBasis">
                 <option value="exam">Examinationsdatum (primärt)</option>
                 <option value="decision">Beslutsdatum (primärt)</option>
                 <option value="auto">Auto (exam → beslut)</option>
               </select>
-            </label>
+            </div>
           </div>
         </details>
       </section>
 
       <footer class="footer">
-        <button id="save" class="primary">Spara</button>
+        <button id="save" class="primary">Spara inställningar</button>
         <button id="reset">Återställ</button>
         <span id="status" class="status"></span>
       </footer>
-    </main>
 
+    </main>
     <script src="options.js"></script>
   </body>
 </html>

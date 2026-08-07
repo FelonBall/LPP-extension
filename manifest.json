@@ -3,6 +3,12 @@
   "name": "L++",
   "version": "1.0.0",
   "description": "Experience points and gamification for Ladok, the Swedish university system.",
+  "icons": {
+    "16": "favicon-ladok.png",
+    "32": "favicon-ladok.png",
+    "48": "favicon-ladok.png",
+    "128": "favicon-ladok.png"
+  },
   "permissions": ["storage", "tabs"],
   "host_permissions": [
     "https://student.ladok.se/student/app/studentwebb/min-utbildning/*"
@@ -16,7 +22,6 @@
         "https://student.ladok.se/student/app/studentwebb/min-utbildning/alla*"
       ],
       "js": ["main_page.js"],
-      "css": ["main.css"],
       "run_at": "document_idle"
     },
     {
