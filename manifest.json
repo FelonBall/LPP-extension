@@ -30,7 +30,8 @@
     },
     {
       "matches": [
-        "https://student.ladok.se/student/app/studentwebb/min-utbildning/kurs*"
+        "https://student.ladok.se/student/app/studentwebb/min-utbildning/kurs*",
+        "https://student.ladok.se/student/app/studentwebb/min-utbildning/alla*"
       ],
       "js": ["course_page_bridge.js"],
       "run_at": "document_start"

@@ -142,11 +142,46 @@ function extractMiniDataset(payload, kursUID) {
   };
 }
 
+// Courses that have not begun return no result payload at all, so scanning them
+// opens a tab for nothing. Only what the scan filter needs is kept — the blob
+// carries far more, but storing personal data with no consumer is not free.
+// Re-registrations mean several participations per course; a course counts as
+// started if any of them is.
+function extractParticipations(payload) {
+  const byCourse = new Map();
+
+  for (const d of payload?.Tillfallesdeltaganden ?? []) {
+    const u = d.Utbildningsinformation ?? {};
+    const uid = u.UtbildningUID;
+    if (!uid) continue;
+
+    const cur = byCourse.get(uid) ?? {
+      courseCode: u.Utbildningskod ?? null,
+      started: false,
+      registrations: 0
+    };
+    cur.started = cur.started || !!d.Paborjad;
+    cur.registrations += 1;
+    byCourse.set(uid, cur);
+  }
+
+  return Object.fromEntries(byCourse);
+}
+
 // 3) Listen for page hook messages and forward to background
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
   const msg = event.data;
-  if (!msg || msg.source !== "ladokpp" || msg.kind !== "egenkursinformation") return;
+  if (!msg || msg.source !== "ladokpp") return;
+
+  if (msg.kind === "tillfallesdeltaganden") {
+    const courses = extractParticipations(msg.data);
+    if (Object.keys(courses).length === 0) return;
+    chrome.runtime.sendMessage({ type: "LADOKPP_SAVE_PARTICIPATIONS", payload: courses });
+    return;
+  }
+
+  if (msg.kind !== "egenkursinformation") return;
 
   // Never use / store msg.data.StudentUID etc — extractor ignores it.
   const mini = extractMiniDataset(msg.data, msg.kursUID);

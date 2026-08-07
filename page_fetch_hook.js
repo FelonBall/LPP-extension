@@ -1,24 +1,41 @@
 (() => {
-  // Primary: exact known path format (the numeric segment after /proxy/ is an API version, e.g. /proxy/10/)
-  const RX_PRIMARY = /\/student\/proxy\/(?:\d+\/)?resultat\/internal\/studentenskurser\/egenkursinformation\/student\/[0-9a-f-]{36}\/kursUID\/[0-9a-f-]{36}/i;
-  // Fallback: any path that has egenkursinformation and a kursUID segment (survives minor API restructuring)
-  const RX_FALLBACK = /\/egenkursinformation\/.*\/kursUID\/[0-9a-f-]{36}/i;
+  // The numeric segment after /proxy/ is an API version, e.g. /proxy/10/. Each
+  // endpoint keeps a loose fallback so minor restructuring does not silence us.
+  const RX_COURSE = /\/student\/proxy\/(?:\d+\/)?resultat\/internal\/studentenskurser\/egenkursinformation\/student\/[0-9a-f-]{36}\/kursUID\/[0-9a-f-]{36}/i;
+  const RX_COURSE_FALLBACK = /\/egenkursinformation\/.*\/kursUID\/[0-9a-f-]{36}/i;
+
+  // Loaded once on the course list page; covers every participation at once.
+  const RX_PARTICIPATIONS = /\/student\/proxy\/(?:\d+\/)?studiedeltagande\/internal\/tillfallesdeltagande\/kurstillfallesdeltagande\/student\/[0-9a-f-]{36}/i;
+  const RX_PARTICIPATIONS_FALLBACK = /\/kurstillfallesdeltagande\/student\/[0-9a-f-]{36}/i;
+
   const TARGET_ORIGIN = window.location.origin;
 
-  function shouldCapture(url) {
+  function classify(url) {
+    let path;
     try {
-      const u = new URL(url, location.origin);
-      return RX_PRIMARY.test(u.pathname) || RX_FALLBACK.test(u.pathname);
+      path = new URL(url, location.origin).pathname;
     } catch {
-      return false;
+      return null;
     }
+
+    if (RX_COURSE.test(path) || RX_COURSE_FALLBACK.test(path)) {
+      const parts = path.split("/");
+      const i = parts.indexOf("kursUID");
+      return { kind: "egenkursinformation", kursUID: i >= 0 ? parts[i + 1] : null };
+    }
+
+    if (RX_PARTICIPATIONS.test(path) || RX_PARTICIPATIONS_FALLBACK.test(path)) {
+      return { kind: "tillfallesdeltaganden", kursUID: null };
+    }
+
+    return null;
   }
 
-  function extractKursUID(url) {
-    const u = new URL(url, location.origin);
-    const parts = u.pathname.split("/");
-    const i = parts.indexOf("kursUID");
-    return i >= 0 ? parts[i + 1] : null;
+  function publish(hit, url, data) {
+    window.postMessage(
+      { source: "ladokpp", kind: hit.kind, url, kursUID: hit.kursUID, data },
+      TARGET_ORIGIN
+    );
   }
 
   const origFetch = window.fetch;
@@ -27,21 +44,10 @@
 
     try {
       const url = typeof args[0] === "string" ? args[0] : args[0]?.url;
-      if (url && shouldCapture(url)) {
-        const kursUID = extractKursUID(url);
+      const hit = url ? classify(url) : null;
+      if (hit) {
         const clone = res.clone();
-        const data = await clone.json();
-
-        window.postMessage(
-          {
-            source: "ladokpp",
-            kind: "egenkursinformation",
-            url,
-            kursUID,
-            data
-          },
-          TARGET_ORIGIN
-        );
+        publish(hit, url, await clone.json());
       }
     } catch (err) {
       if (err instanceof SyntaxError) {
@@ -67,20 +73,9 @@
     this.addEventListener("load", function () {
       try {
         const url = typeof this.__ladokppUrl === "string" ? this.__ladokppUrl : null;
-        if (!url || !shouldCapture(url)) return;
-        const kursUID = extractKursUID(url);
-        const data = JSON.parse(this.responseText);
-
-        window.postMessage(
-          {
-            source: "ladokpp",
-            kind: "egenkursinformation",
-            url,
-            kursUID,
-            data
-          },
-          TARGET_ORIGIN
-        );
+        const hit = url ? classify(url) : null;
+        if (!hit) return;
+        publish(hit, url, JSON.parse(this.responseText));
       } catch (err) {
         if (err instanceof SyntaxError) {
           console.warn("Ladok++ API format may have changed (XHR parse error)");

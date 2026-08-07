@@ -1,4 +1,6 @@
 const STORAGE_KEY = "ladokpp.courses";
+const PARTICIPATIONS_KEY = "ladokpp.participations";
+const SCAN_KEY = "ladokpp.scan";
 const LADOK_URL = "https://student.ladok.se/student/app/studentwebb/min-utbildning/alla";
 
 function formatLastSeen(iso) {
@@ -18,10 +20,23 @@ function formatLastSeen(iso) {
 const show = (id, visible) =>
   document.getElementById(id).classList.toggle("hidden", !visible);
 
+function renderScan(scan) {
+  const running = !!scan?.running;
+  show("scanCard", running);
+  if (!running) return;
+
+  const { done = 0, total = 0 } = scan;
+  document.getElementById("scanCounter").textContent = `${done} / ${total}`;
+  document.getElementById("scanFill").style.width =
+    total > 0 ? `${Math.round((done / total) * 100)}%` : "0%";
+}
+
 async function render() {
-  const stored = await chrome.storage.local.get(STORAGE_KEY);
+  const stored = await chrome.storage.local.get([STORAGE_KEY, SCAN_KEY]);
   const courses = Object.values(stored[STORAGE_KEY] ?? {});
   const hasData = courses.length > 0;
+
+  renderScan(stored[SCAN_KEY]);
 
   document.getElementById("courseCount").textContent = courses.length;
   document.getElementById("confirmCount").textContent =
@@ -45,6 +60,20 @@ async function render() {
     when ? `Senast uppdaterad ${when}` : "";
 }
 
+document.getElementById("stopScan").addEventListener("click", async () => {
+  const btn = document.getElementById("stopScan");
+  btn.disabled = true;
+  btn.textContent = "Stoppar…";
+  await chrome.runtime.sendMessage({ type: "LADOKPP_STOP_SCAN" });
+});
+
+// The scan runs in the service worker and outlives this popup, so track it
+// live rather than only on open.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (changes[SCAN_KEY] || changes[STORAGE_KEY]) render();
+});
+
 // Two-step confirm: the popup is one click from the toolbar, so a single
 // misclick should not wipe a full scan.
 document.getElementById("clearBtn").addEventListener("click", () => {
@@ -59,8 +88,8 @@ document.getElementById("cancelClear").addEventListener("click", () => {
 });
 
 document.getElementById("confirmClear").addEventListener("click", async () => {
-  // Only the collected course data — settings live in storage.sync and stay.
-  await chrome.storage.local.remove(STORAGE_KEY);
+  // Only the saved course data — settings live in storage.sync and stay.
+  await chrome.storage.local.remove([STORAGE_KEY, PARTICIPATIONS_KEY]);
   await render();
 });
 

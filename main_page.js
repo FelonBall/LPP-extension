@@ -5,6 +5,7 @@
     showXpToNext: true,
     epicMode: false,
     showStats: true,
+    scanConsent: false, // set once the user has accepted the scan explanation
     termBoundaryMode: "week",
     academicYearStartWeek: 36,
     includeSummerWeeks: true,
@@ -17,8 +18,6 @@
   // Performance and timing constants
   const DEBOUNCE_MS = 60;
   const PATH_WATCH_MS = 250;
-  const TAB_THROTTLE_MS = 800;
-  const SCAN_RESET_DELAY_MS = 1200;
   const INITIAL_SCHEDULE_TRIES = 40;
   const INITIAL_SCHEDULE_INTERVAL_MS = 500;
 
@@ -340,6 +339,31 @@
   async function ladokppScanUrls(urls) {
     if (!Array.isArray(urls) || urls.length === 0) return;
     await runtimeSendMessage({ type: "LADOKPP_SCAN_URLS", urls });
+  }
+
+  async function ladokppStopScan() {
+    await runtimeSendMessage({ type: "LADOKPP_STOP_SCAN" });
+  }
+
+  // Empty set when the participations feed has not been seen yet, so an unknown
+  // course is scanned rather than silently skipped.
+  async function ladokppGetNotStartedUIDs() {
+    try {
+      const r = await api.storage.local.get("ladokpp.participations");
+      const p = r?.["ladokpp.participations"] ?? {};
+      return new Set(Object.entries(p).filter(([, v]) => !v?.started).map(([uid]) => uid));
+    } catch {
+      return new Set();
+    }
+  }
+
+  async function ladokppGetScanState() {
+    try {
+      const r = await api.storage.local.get("ladokpp.scan");
+      return r?.["ladokpp.scan"] ?? null;
+    } catch {
+      return null;
+    }
   }
 
   function loadConfig() {
@@ -1417,6 +1441,7 @@
       extra.style.color = epic ? "inherit" : "var(--bs-secondary-color, rgba(34,34,36,.75))";
 
       const leftExtra = document.createElement("div");
+      leftExtra.id = `${cfg.mountId}-scaninfo`;
       leftExtra.style.whiteSpace = "nowrap";
       leftExtra.style.overflow = "hidden";
       leftExtra.style.textOverflow = "ellipsis";
@@ -1432,32 +1457,92 @@
 
       leftExtra.textContent = coverage + modLine;
 
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.setAttribute("aria-label", extras.scanBusy ? "Scanning all courses" : "Scan all courses");
-      btn.textContent = extras.scanBusy ? "Skannar…" : "Skanna alla";
-      btn.disabled = !!extras.scanBusy;
-      btn.style.border = epic
-        ? `1px solid ${rgbToRgba(accent, 0.20)}`
-        : "1px solid var(--bs-border-color-translucent, rgba(0,0,0,.175))";
-      btn.style.background = epic ? "rgba(255,255,255,0.75)" : "var(--bs-card-bg, #fff)";
-      btn.style.color = "var(--bs-body-color, inherit)";
-      btn.style.borderRadius = "var(--bs-border-radius-pill, 999px)";
-      btn.style.padding = epic ? "8px 12px" : "5px 12px";
-      btn.style.fontFamily = "var(--bs-body-font-family, inherit)";
-      btn.style.fontSize = "inherit";
-      btn.style.fontWeight = "600";
-      btn.style.cursor = btn.disabled ? "not-allowed" : "pointer";
-      btn.style.whiteSpace = "nowrap";
+      const pill = (label, solid = false) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = label;
+        b.style.border = solid
+          ? "1px solid transparent"
+          : epic
+            ? `1px solid ${rgbToRgba(accent, 0.20)}`
+            : "1px solid var(--bs-border-color-translucent, rgba(0,0,0,.175))";
+        b.style.background = solid
+          ? accent
+          : epic ? "rgba(255,255,255,0.75)" : "var(--bs-card-bg, #fff)";
+        b.style.color = solid ? "#fff" : "var(--bs-body-color, inherit)";
+        b.style.borderRadius = "var(--bs-border-radius-pill, 999px)";
+        b.style.padding = epic ? "8px 12px" : "5px 12px";
+        b.style.fontFamily = "var(--bs-body-font-family, inherit)";
+        b.style.fontSize = "inherit";
+        b.style.fontWeight = "600";
+        b.style.cursor = "pointer";
+        b.style.whiteSpace = "nowrap";
+        return b;
+      };
 
-      btn.addEventListener("click", () => {
-        // delegate back to mountOrUpdate (it will attach handler via extras.onScanAll)
-        extras.onScanAll?.();
-      });
+      const scanState = extras.scanState;
 
-      extra.appendChild(leftExtra);
-      extra.appendChild(btn);
-      layer.appendChild(extra);
+      if (scanState?.running) {
+        leftExtra.textContent = `Skannar ${scanState.done} av ${scanState.total} kurser…`;
+        const stop = pill("Stopp");
+        stop.setAttribute("aria-label", "Stop scanning");
+        stop.addEventListener("click", () => extras.onStopScan?.());
+        extra.appendChild(leftExtra);
+        extra.appendChild(stop);
+        layer.appendChild(extra);
+
+      } else if (extras.scanConfirmOpen) {
+        // Shown once, before the first scan. After that the tooltip on the button
+        // is the standing explanation.
+        extra.style.display = "grid";
+        extra.style.gap = "8px";
+        extra.style.justifyContent = "stretch";
+
+        const text = document.createElement("div");
+        text.style.whiteSpace = "normal";
+        text.textContent =
+          `Skanningen öppnar ${listCourseCount ?? "dina"} kurssidor i bakgrundsflikar i hög takt, ` +
+          `en i taget, och sparar dina resultat lokalt i webbläsaren. ` +
+          `Ingenting skickas vidare, och du kan stoppa den när som helst.`;
+
+        const row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.alignItems = "center";
+        row.style.gap = "8px";
+
+        const start = pill("Starta skanning", true);
+        start.addEventListener("click", () => extras.onScanConsent?.());
+        const cancel = pill("Avbryt");
+        cancel.addEventListener("click", () => extras.onScanConfirmClose?.());
+
+        const policy = document.createElement("a");
+        policy.textContent = "Integritetspolicy";
+        policy.href = api.runtime.getURL("privacy-policy.md");
+        policy.target = "_blank";
+        policy.rel = "noopener";
+        policy.style.marginLeft = "auto";
+        policy.style.color = "inherit";
+
+        row.appendChild(start);
+        row.appendChild(cancel);
+        row.appendChild(policy);
+
+        extra.appendChild(text);
+        extra.appendChild(row);
+        layer.appendChild(extra);
+
+      } else {
+        const btn = pill("Skanna alla");
+        btn.setAttribute("aria-label", "Scan all courses");
+        btn.title =
+          "Öppnar dina kurssidor i bakgrundsflikar och hämtar detaljerade " +
+          "resultat per modul. Sparas lokalt i webbläsaren.";
+        btn.addEventListener("click", () => extras.onScanAll?.());
+
+        extra.appendChild(leftExtra);
+        extra.appendChild(btn);
+        layer.appendChild(extra);
+      }
     }
 
     if (extras?.stats && cfg.showStats) {
@@ -1507,6 +1592,8 @@
   let lastKey = null;
   let pathWatcherInterval = null;
   let scanBusy = false;
+  let scanConfirmOpen = false;
+  let scanPhase = "idle";
 
   function schedule() {
     if (scheduled) return;
@@ -1567,14 +1654,30 @@
     // (not saved data, which will update separately via storage listener)
     const titleText = titleAnchor?.textContent?.trim() || "";
     const hpText = (span.textContent || "").trim();
-    const key = `${titleText}||${totalHp}||${hpText}||${cfg.levelExponent}||${cfg.epicMode}||${cfg.showXpToNext}`;
-
     const savedCourses = await ladokppGetAllCourseData();
     const agg = computeAggregateFromSaved(savedCourses);
     const stats = computeStatsFromSaved(savedCourses, cfg);
-
+    const scanState = await ladokppGetScanState();
+    const notStartedUIDs = await ladokppGetNotStartedUIDs();
 
     const existing = dd.querySelector(`#${cfg.mountId}`);
+    const phase = scanState?.running ? "running" : "idle";
+
+    // Phase is in the key so entering and leaving a scan always rebuilds, rather
+    // than relying on a listener having nulled lastKey.
+    const key = `${titleText}||${totalHp}||${hpText}||${cfg.levelExponent}||${cfg.epicMode}||${cfg.showXpToNext}||${scanConfirmOpen}||${phase}`;
+
+    // A scan fires a storage change per completed course, and a full rebuild would
+    // replace the Stop button under the pointer — making it nearly unclickable, and
+    // collapsing the stats panel each tick. While the scan stays in the same phase,
+    // patch the one line that actually changed and leave the DOM alone.
+    if (existing && phase === "running" && scanPhase === "running") {
+      const info = existing.querySelector(`#${cfg.mountId}-scaninfo`);
+      if (info) info.textContent = `Skannar ${scanState.done} av ${scanState.total} kurser…`;
+      return;
+    }
+    scanPhase = phase;
+
     if (existing && key === lastKey) return;
 
     lastKey = key;
@@ -1584,39 +1687,66 @@
     // Discover course URLs from links on the page.
     // Match by UUID pattern on the resolved pathname so we're robust to
     // relative hrefs, full URLs, and minor Ladok path restructuring.
-    const COURSE_PATH_RX = /\/min-utbildning\/kurs\/[0-9a-f-]{36}/i;
+    const COURSE_PATH_RX = /\/min-utbildning\/kurs\/([0-9a-f-]{36})/i;
     const courseUrlSet = new Set();
     for (const a of Array.from(document.querySelectorAll("a[href]"))) {
       try {
         const u = new URL(a.getAttribute("href"), location.origin);
-        if (u.hostname === location.hostname && COURSE_PATH_RX.test(u.pathname)) {
-          courseUrlSet.add(u.toString());
-        }
+        if (u.hostname !== location.hostname) continue;
+        const m = u.pathname.match(COURSE_PATH_RX);
+        // The link UID is the UtbildningUID that keys the participations feed.
+        if (m && !notStartedUIDs.has(m[1])) courseUrlSet.add(u.toString());
       } catch {}
     }
     const courseUrls = Array.from(courseUrlSet);
 
-    // Count how many courses exist on the list page (rough proxy: number of unique course links)
+    // Courses that have not begun are excluded: they return no result payload, so
+    // counting them would leave the coverage figure permanently short of its total.
     const listCourseCount = courseUrls.length || null;
 
-    const onScanAll = async () => {
+    const rerender = () => {
+      lastKey = null;
+      schedule();
+    };
+
+    const startScan = async () => {
       if (scanBusy) return;
       scanBusy = true;
-      lastKey = null;       // force rerender so button text changes
-      schedule();
+      scanConfirmOpen = false;
+      rerender();
 
       try {
+        // Resolves when the scan finishes or is stopped; progress arrives via storage.
         await ladokppScanUrls(courseUrls);
       } catch (err) {
         console.error("Ladok++ scan error:", err);
       } finally {
-        // We'll mark not-busy after a short delay. Data will arrive async as tabs load.
-        setTimeout(() => {
-          scanBusy = false;
-          lastKey = null;
-          schedule();
-        }, SCAN_RESET_DELAY_MS);
+        scanBusy = false;
+        rerender();
       }
+    };
+
+    const onScanAll = () => {
+      if (scanBusy) return;
+      if (!cfg.scanConsent) {
+        scanConfirmOpen = true;
+        rerender();
+        return;
+      }
+      startScan();
+    };
+
+    const onScanConsent = async () => {
+      try {
+        await api.storage.sync.set({ scanConsent: true });
+      } catch {}
+      cfg.scanConsent = true;
+      startScan();
+    };
+
+    const onScanConfirmClose = () => {
+      scanConfirmOpen = false;
+      rerender();
     };
 
     const extras = {
@@ -1624,8 +1754,12 @@
       modulesTotal: agg.modulesTotal,
       modulesPassed: agg.modulesPassed,
       listCourseCount,
-      scanBusy,
+      scanState,
+      scanConfirmOpen,
       onScanAll,
+      onScanConsent,
+      onScanConfirmClose,
+      onStopScan: ladokppStopScan,
       stats
     };
 
@@ -1688,8 +1822,9 @@
     api.storage.onChanged.addListener((changes, area) => {
       if (area !== "sync" && area !== "local") return;
 
-      // if settings changed or our saved courses changed, rerender
-      if (area === "sync" || changes["ladokpp.courses"]) {
+      // if settings changed, saved courses changed, or a scan progressed, rerender
+      if (area === "sync" || changes["ladokpp.courses"] || changes["ladokpp.scan"] ||
+          changes["ladokpp.participations"]) {
         lastKey = null;
         schedule();
       }

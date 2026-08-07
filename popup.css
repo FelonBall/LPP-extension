@@ -112,6 +112,51 @@ body {
   margin-top: 6px;
 }
 
+/* ── Scan progress ────────────────────────────────── */
+.scan { margin-bottom: 10px; }
+
+.scan-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.scan-label { font-size: 13px; font-weight: 600; }
+
+.scan-counter {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-track {
+  height: 6px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.09);
+  overflow: hidden;
+}
+
+.scan-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--primary);
+  transition: width 0.2s ease;
+}
+
+.stop {
+  width: 100%;
+  margin-top: 10px;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 /* ── Clear data ───────────────────────────────────── */
 .card-foot {
   margin-top: 12px;
