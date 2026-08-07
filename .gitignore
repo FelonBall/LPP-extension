@@ -1,3 +1,12 @@
-examples
-lol.json
-old.js
+dev/
+test
+ladok-purge-playwright
+.claude/
+
+# Local-only notes on Ladok's internal API
+PAYLOAD.md
+
+# Captured responses and scan dumps — contain personal study records
+*_raw
+network_fetch.json
+ladokpp.courses*
