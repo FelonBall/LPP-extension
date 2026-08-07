@@ -1,8 +1,8 @@
 (() => {
-  // Primary: exact known path format
-  const RX_PRIMARY = /\/student\/proxy\/resultat\/internal\/studentenskurser\/egenkursinformation\/student\/[0-9a-f-]{36}\/kursUID\/[0-9a-f-]{36}/i;
+  // Primary: exact known path format (the numeric segment after /proxy/ is an API version, e.g. /proxy/10/)
+  const RX_PRIMARY = /\/student\/proxy\/(?:\d+\/)?resultat\/internal\/studentenskurser\/egenkursinformation\/student\/[0-9a-f-]{36}\/kursUID\/[0-9a-f-]{36}/i;
   // Fallback: any path that has egenkursinformation and a kursUID segment (survives minor API restructuring)
-  const RX_FALLBACK = /\/egenkursinformation\/. *\/kursUID\/[0-9a-f-]{36}/i;
+  const RX_FALLBACK = /\/egenkursinformation\/.*\/kursUID\/[0-9a-f-]{36}/i;
 
   function shouldCapture(url) {
     try {
