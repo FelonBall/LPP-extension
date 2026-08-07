@@ -57,6 +57,14 @@
     return ["G", "A", "B", "C", "D", "E"].includes(code);
   }
 
+  // Newer scans carry Ladok's own GiltigSomSlutbetyg flag, which is correct for
+  // any grading scale. Fall back to the grade code for data saved before that.
+  function isPassedResult(result) {
+    if (!result) return false;
+    if (typeof result.passed === "boolean") return result.passed;
+    return isPassedGrade(result.grade);
+  }
+
   function computeAggregateFromSaved(savedCoursesObj) {
     const courses = Object.values(savedCoursesObj || {});
     const courseCount = courses.length;
@@ -68,8 +76,7 @@
       const mods = c?.modules || [];
       modulesTotal += mods.length;
       for (const m of mods) {
-        const g = m?.latest?.grade;
-        if (g && isPassedGrade(g)) modulesPassed += 1;
+        if (isPassedResult(m?.latest)) modulesPassed += 1;
       }
     }
 
@@ -231,9 +238,8 @@
       let moduleCreditsCount = 0;
       for (const m of mods) {
         const latest = m?.latest;
-        const g = latest?.grade;
+        if (!isPassedResult(latest)) continue;
         const credits = parseCredits(m?.creditsAwarded ?? m?.credits);
-        if (!g || !isPassedGrade(g)) continue;
         if (!credits || !Number.isFinite(credits) || credits <= 0) continue;
         const d = pickModuleDate(m, cfg);
         if (!d) continue;
@@ -263,9 +269,8 @@
       // If module credits are missing, fall back to course-level credits + course result date
       if (moduleCreditsSum === 0) {
         const cr = c?.courseResult;
-        const g = cr?.grade;
         const credits = parseCredits(c?.courseCreditsAwarded ?? c?.courseCredits);
-        if (g && isPassedGrade(g) && credits && Number.isFinite(credits) && credits > 0) {
+        if (isPassedResult(cr) && credits && Number.isFinite(credits) && credits > 0) {
           const d = pickResultDate(cr, cfg) || parseDateSafe(c?.end) || parseDateSafe(c?.start);
           if (d) {
             const key = monthKey(d);
