@@ -23,6 +23,10 @@
 
   const api = globalThis.chrome ?? globalThis.browser;
 
+  const COURSES_KEY = "ladokpp.courses";
+  const PARTICIPATIONS_KEY = "ladokpp.participations";
+  const SCAN_KEY = "ladokpp.scan";
+
     // ---------- Ladok++ saved course-data ----------
   function runtimeSendMessage(msg) {
     // chrome.* uses callbacks; browser.* can be Promise. Support both.
@@ -56,8 +60,7 @@
     return ["G", "A", "B", "C", "D", "E"].includes(code);
   }
 
-  // Newer scans carry Ladok's own GiltigSomSlutbetyg flag, which is correct for
-  // any grading scale. Fall back to the grade code for data saved before that.
+  // Falls back to the grade code for data saved before `passed` existed.
   function isPassedResult(result) {
     if (!result) return false;
     if (typeof result.passed === "boolean") return result.passed;
@@ -345,26 +348,25 @@
     await runtimeSendMessage({ type: "LADOKPP_STOP_SCAN" });
   }
 
-  // Empty set when the participations feed has not been seen yet, so an unknown
-  // course is scanned rather than silently skipped.
-  async function ladokppGetNotStartedUIDs() {
+  // One read for both keys. Empty unscannableUIDs means scan everything.
+  async function ladokppGetLocalState() {
     try {
-      const r = await api.storage.local.get("ladokpp.participations");
-      const p = r?.["ladokpp.participations"] ?? {};
-      return new Set(Object.entries(p).filter(([, v]) => !v?.started).map(([uid]) => uid));
+      const r = await api.storage.local.get([SCAN_KEY, PARTICIPATIONS_KEY]);
+      const p = r?.[PARTICIPATIONS_KEY] ?? {};
+      return {
+        scan: r?.[SCAN_KEY] ?? null,
+        unscannableUIDs: new Set(
+          Object.entries(p)
+            .filter(([, v]) => !v?.started || v?.carriesResults === false)
+            .map(([uid]) => uid)
+        )
+      };
     } catch {
-      return new Set();
+      return { scan: null, unscannableUIDs: new Set() };
     }
   }
 
-  async function ladokppGetScanState() {
-    try {
-      const r = await api.storage.local.get("ladokpp.scan");
-      return r?.["ladokpp.scan"] ?? null;
-    } catch {
-      return null;
-    }
-  }
+  const scanLine = (scan) => `Skannar ${scan.done} av ${scan.total} kurser…`;
 
   function loadConfig() {
     return new Promise((resolve) => {
@@ -469,14 +471,8 @@
   }
 
   // --------------- progression math -----------
-  // Converts HP (credits) to XP and maps XP to a level. Levels run 0–100: level 0
-  // is zero credits and level 100 is a finished programme, so there are exactly
-  // 100 intervals and at exponent 1.0 the level *is* percent complete.
-  //
-  // Level L sits at (L/100)^levelExponent of the programme's total XP, so a
-  // HIGHER exponent lowers the early thresholds and levels arrive faster:
-  //   1.0: linear — level tracks percent of the programme exactly
-  //   3.0: steeply front-loaded — level 46 after 10% of the programme
+  // Level L sits at (L/100)^levelExponent of total XP, across levels 0–100.
+  // A higher exponent lowers the early thresholds; 1.0 is linear.
   function makeProgression(totalHp, cfg) {
     const xpPerHp = 100;
     const levelCap = 100;
@@ -768,8 +764,7 @@
     return wrap;
   }
 
-  // Charts are sized from their container, so a window resize leaves them
-  // stretched until something redraws them.
+  // Charts size from their container, so a resize needs a redraw.
   let chartResizeHandler = null;
 
   function registerChartResize(render) {
@@ -1483,17 +1478,15 @@
       const scanState = extras.scanState;
 
       if (scanState?.running) {
-        leftExtra.textContent = `Skannar ${scanState.done} av ${scanState.total} kurser…`;
+        leftExtra.textContent = scanLine(scanState);
         const stop = pill("Stopp");
         stop.setAttribute("aria-label", "Stop scanning");
         stop.addEventListener("click", () => extras.onStopScan?.());
         extra.appendChild(leftExtra);
         extra.appendChild(stop);
-        layer.appendChild(extra);
 
       } else if (extras.scanConfirmOpen) {
-        // Shown once, before the first scan. After that the tooltip on the button
-        // is the standing explanation.
+        // Shown once; after that the button tooltip is the standing explanation.
         extra.style.display = "grid";
         extra.style.gap = "8px";
         extra.style.justifyContent = "stretch";
@@ -1529,7 +1522,6 @@
 
         extra.appendChild(text);
         extra.appendChild(row);
-        layer.appendChild(extra);
 
       } else {
         const btn = pill("Skanna alla");
@@ -1541,8 +1533,9 @@
 
         extra.appendChild(leftExtra);
         extra.appendChild(btn);
-        layer.appendChild(extra);
       }
+
+      layer.appendChild(extra);
     }
 
     if (extras?.stats && cfg.showStats) {
@@ -1594,6 +1587,7 @@
   let scanBusy = false;
   let scanConfirmOpen = false;
   let scanPhase = "idle";
+  let settingsDirty = false;
 
   function schedule() {
     if (scheduled) return;
@@ -1654,33 +1648,31 @@
     // (not saved data, which will update separately via storage listener)
     const titleText = titleAnchor?.textContent?.trim() || "";
     const hpText = (span.textContent || "").trim();
-    const savedCourses = await ladokppGetAllCourseData();
-    const agg = computeAggregateFromSaved(savedCourses);
-    const stats = computeStatsFromSaved(savedCourses, cfg);
-    const scanState = await ladokppGetScanState();
-    const notStartedUIDs = await ladokppGetNotStartedUIDs();
-
     const existing = dd.querySelector(`#${cfg.mountId}`);
-    const phase = scanState?.running ? "running" : "idle";
 
-    // Phase is in the key so entering and leaving a scan always rebuilds, rather
-    // than relying on a listener having nulled lastKey.
-    const key = `${titleText}||${totalHp}||${hpText}||${cfg.levelExponent}||${cfg.epicMode}||${cfg.showXpToNext}||${scanConfirmOpen}||${phase}`;
+    const local = await ladokppGetLocalState();
+    const phase = local.scan?.running ? "running" : "idle";
 
-    // A scan fires a storage change per completed course, and a full rebuild would
-    // replace the Stop button under the pointer — making it nearly unclickable, and
-    // collapsing the stats panel each tick. While the scan stays in the same phase,
-    // patch the one line that actually changed and leave the DOM alone.
-    if (existing && phase === "running" && scanPhase === "running") {
+    // Patch the progress line instead of rebuilding, so the Stop button survives the
+    // scan. Sits above the aggregate work it would otherwise discard.
+    if (existing && phase === "running" && scanPhase === "running" && !settingsDirty) {
       const info = existing.querySelector(`#${cfg.mountId}-scaninfo`);
-      if (info) info.textContent = `Skannar ${scanState.done} av ${scanState.total} kurser…`;
+      if (info) info.textContent = scanLine(local.scan);
       return;
     }
     scanPhase = phase;
+    settingsDirty = false;
 
+    // Phase is in the key so entering and leaving a scan always rebuilds.
+    const key = `${titleText}||${totalHp}||${hpText}||${cfg.levelExponent}||${cfg.epicMode}||${cfg.showXpToNext}||${scanConfirmOpen}||${phase}`;
     if (existing && key === lastKey) return;
-
     lastKey = key;
+
+    const savedCourses = await ladokppGetAllCourseData();
+    const agg = computeAggregateFromSaved(savedCourses);
+    const stats = computeStatsFromSaved(savedCourses, cfg);
+    const scanState = local.scan;
+    const unscannableUIDs = local.unscannableUIDs;
 
         // --- Ladok++: load saved per-course/module data ---
 
@@ -1695,13 +1687,12 @@
         if (u.hostname !== location.hostname) continue;
         const m = u.pathname.match(COURSE_PATH_RX);
         // The link UID is the UtbildningUID that keys the participations feed.
-        if (m && !notStartedUIDs.has(m[1])) courseUrlSet.add(u.toString());
+        if (m && !unscannableUIDs.has(m[1])) courseUrlSet.add(u.toString());
       } catch {}
     }
     const courseUrls = Array.from(courseUrlSet);
 
-    // Courses that have not begun are excluded: they return no result payload, so
-    // counting them would leave the coverage figure permanently short of its total.
+    // Excluded above, so the coverage figure can actually reach its total.
     const listCourseCount = courseUrls.length || null;
 
     const rerender = () => {
@@ -1727,7 +1718,11 @@
     };
 
     const onScanAll = () => {
-      if (scanBusy) return;
+      // Everything filtered out; a scan would resolve instantly and look dead.
+      if (courseUrls.length === 0) {
+        window.alert("Inget att skanna: inga av kurserna på sidan har resultat att hämta ännu.");
+        return;
+      }
       if (!cfg.scanConsent) {
         scanConfirmOpen = true;
         rerender();
@@ -1823,8 +1818,9 @@
       if (area !== "sync" && area !== "local") return;
 
       // if settings changed, saved courses changed, or a scan progressed, rerender
-      if (area === "sync" || changes["ladokpp.courses"] || changes["ladokpp.scan"] ||
-          changes["ladokpp.participations"]) {
+      if (area === "sync" || changes[COURSES_KEY] || changes[SCAN_KEY] ||
+          changes[PARTICIPATIONS_KEY]) {
+        if (area === "sync") settingsDirty = true;
         lastKey = null;
         schedule();
       }

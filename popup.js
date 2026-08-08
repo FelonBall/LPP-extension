@@ -25,10 +25,15 @@ function renderScan(scan) {
   show("scanCard", running);
   if (!running) return;
 
-  const { done = 0, total = 0 } = scan;
+  const { done = 0, total = 0, stopping = false } = scan;
   document.getElementById("scanCounter").textContent = `${done} / ${total}`;
   document.getElementById("scanFill").style.width =
     total > 0 ? `${Math.round((done / total) * 100)}%` : "0%";
+
+  // From published state, since workers keep publishing after a stop.
+  const stop = document.getElementById("stopScan");
+  stop.disabled = stopping;
+  stop.textContent = stopping ? "Stoppar…" : "Stoppa skanning";
 }
 
 async function render() {
@@ -49,33 +54,37 @@ async function render() {
 
   if (!hasData) return;
 
-  const latest = courses
-    .map(c => c?.lastSeenAt)
-    .filter(Boolean)
-    .sort()
-    .at(-1);
+  const latest = courses.reduce(
+    (max, c) => (c?.lastSeenAt > max ? c.lastSeenAt : max),
+    ""
+  );
 
   const when = latest ? formatLastSeen(latest) : null;
   document.getElementById("lastSeen").textContent =
     when ? `Senast uppdaterad ${when}` : "";
 }
 
-document.getElementById("stopScan").addEventListener("click", async () => {
-  const btn = document.getElementById("stopScan");
-  btn.disabled = true;
-  btn.textContent = "Stoppar…";
-  await chrome.runtime.sendMessage({ type: "LADOKPP_STOP_SCAN" });
+document.getElementById("stopScan").addEventListener("click", function () {
+  // Optimistic; the published `stopping` flag takes over from the next render.
+  this.disabled = true;
+  this.textContent = "Stoppar…";
+  chrome.runtime.sendMessage({ type: "LADOKPP_STOP_SCAN" });
 });
 
-// The scan runs in the service worker and outlives this popup, so track it
-// live rather than only on open.
+// The scan outlives this popup. Both keys change per course, so coalesce.
+let renderQueued = false;
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  if (changes[SCAN_KEY] || changes[STORAGE_KEY]) render();
+  if (!changes[SCAN_KEY] && !changes[STORAGE_KEY] && !changes[PARTICIPATIONS_KEY]) return;
+  if (renderQueued) return;
+  renderQueued = true;
+  queueMicrotask(() => {
+    renderQueued = false;
+    render();
+  });
 });
 
-// Two-step confirm: the popup is one click from the toolbar, so a single
-// misclick should not wipe a full scan.
+// Two-step confirm: the popup is one click from the toolbar.
 document.getElementById("clearBtn").addEventListener("click", () => {
   show("clearRow", false);
   show("confirmRow", true);

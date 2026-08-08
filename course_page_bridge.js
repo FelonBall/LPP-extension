@@ -7,12 +7,9 @@
   (document.head || document.documentElement).appendChild(s);
 })();
 
-// 2) Extractor (minidata)
-//
-// Field-by-field notes on the payload live in PAYLOAD.md, which is untracked.
+// 2) Extractor (minidata). Payload notes live in PAYLOAD.md, which is untracked.
 
-// Warn once per field per session so drift surfaces in the console rather than
-// as a null in the statistics.
+// Warn once per field per session, so drift surfaces instead of becoming a null.
 const seenDrift = new Set();
 function noteDrift(field, context) {
   if (seenDrift.has(field)) return;
@@ -142,15 +139,24 @@ function extractMiniDataset(payload, kursUID) {
   };
 }
 
-// Courses that have not begun return no result payload at all, so scanning them
-// opens a tab for nothing. Only what the scan filter needs is kept — the blob
-// carries far more, but storing personal data with no consumer is not free.
-// Re-registrations mean several participations per course; a course counts as
-// started if any of them is.
+function educationRule(u, name) {
+  return (u?.Utbildningstyp?.RegelverkForUtbildningstyp?.Regelvarden ?? [])
+    .find(r => r.Regelnamn === name)?.Varde;
+}
+
+// Not-started courses and result-less education types yield no payload, so the
+// scan skips them. Flags are OR-ed per course and err towards scanning.
 function extractParticipations(payload) {
+  const rows = payload?.Tillfallesdeltaganden ?? [];
   const byCourse = new Map();
 
-  for (const d of payload?.Tillfallesdeltaganden ?? []) {
+  // Fail open if Paborjad ever disappears, as carriesResults already does.
+  const paborjadSeen = rows.some(d => typeof d.Paborjad === "boolean");
+  if (rows.length > 0 && !paborjadSeen) {
+    noteDrift("Tillfallesdeltaganden[].Paborjad", { rows: rows.length });
+  }
+
+  for (const d of rows) {
     const u = d.Utbildningsinformation ?? {};
     const uid = u.UtbildningUID;
     if (!uid) continue;
@@ -158,19 +164,22 @@ function extractParticipations(payload) {
     const cur = byCourse.get(uid) ?? {
       courseCode: u.Utbildningskod ?? null,
       started: false,
-      registrations: 0
+      carriesResults: false
     };
-    cur.started = cur.started || !!d.Paborjad;
-    cur.registrations += 1;
+    cur.started = cur.started || !paborjadSeen || !!d.Paborjad;
+    // Absent for ordinary courses; only ever explicitly "false".
+    cur.carriesResults =
+      cur.carriesResults || educationRule(u, "commons.domain.regel.resultat") !== "false";
     byCourse.set(uid, cur);
   }
 
   return Object.fromEntries(byCourse);
 }
 
-// 3) Listen for page hook messages and forward to background
+// 3) Listen for page hook messages and forward to background.
+// Same-origin only; a same-origin sender cannot be authenticated further.
 window.addEventListener("message", (event) => {
-  if (event.source !== window) return;
+  if (event.source !== window || event.origin !== location.origin) return;
   const msg = event.data;
   if (!msg || msg.source !== "ladokpp") return;
 

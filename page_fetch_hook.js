@@ -1,6 +1,5 @@
 (() => {
-  // The numeric segment after /proxy/ is an API version, e.g. /proxy/10/. Each
-  // endpoint keeps a loose fallback so minor restructuring does not silence us.
+  // The numeric segment after /proxy/ is an API version. Fallbacks survive drift.
   const RX_COURSE = /\/student\/proxy\/(?:\d+\/)?resultat\/internal\/studentenskurser\/egenkursinformation\/student\/[0-9a-f-]{36}\/kursUID\/[0-9a-f-]{36}/i;
   const RX_COURSE_FALLBACK = /\/egenkursinformation\/.*\/kursUID\/[0-9a-f-]{36}/i;
 
@@ -19,8 +18,9 @@
     }
 
     if (RX_COURSE.test(path) || RX_COURSE_FALLBACK.test(path)) {
+      // Matched case-insensitively, like the regexes above.
       const parts = path.split("/");
-      const i = parts.indexOf("kursUID");
+      const i = parts.findIndex(p => p.toLowerCase() === "kursuid");
       return { kind: "egenkursinformation", kursUID: i >= 0 ? parts[i + 1] : null };
     }
 

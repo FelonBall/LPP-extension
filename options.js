@@ -4,6 +4,8 @@ const DEFAULTS = {
   showXpToNext: true,
   epicMode: false,
   showStats: true,
+  // Not in the UI, but reset() writes DEFAULTS wholesale so it must be listed.
+  scanConsent: false,
   termBoundaryMode: "week",
   academicYearStartWeek: 36,
   includeSummerWeeks: true,

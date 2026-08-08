@@ -39,7 +39,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["page_fetch_hook.js"],
+      "resources": ["page_fetch_hook.js", "privacy-policy.md"],
       "matches": ["https://student.ladok.se/*"]
     }
   ],
